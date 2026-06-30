@@ -13,6 +13,8 @@ interface SidebarProps {
 const adminMenus = [
   { href: '/admin/sites', icon: Building2, label: '현장 관리' },
   { href: '/admin/users', icon: Users, label: '사용자 관리' },
+  { href: '/expenses/new', icon: PlusCircle, label: '비용 입력' },
+  { href: '/expenses', icon: ClipboardList, label: '월별 내역' },
 ]
 
 const staffMenus = [
