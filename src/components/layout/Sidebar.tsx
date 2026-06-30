@@ -24,6 +24,8 @@ const staffMenus = [
 const hqMenus = [
   { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
   { href: '/hq/overview', icon: FileText, label: '전체 현황' },
+  { href: '/expenses/new', icon: PlusCircle, label: '비용 입력' },
+  { href: '/expenses', icon: ClipboardList, label: '월별 내역' },
 ]
 
 export function Sidebar({ role, userName }: SidebarProps) {
