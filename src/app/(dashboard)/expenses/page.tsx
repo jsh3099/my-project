@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { PlusCircle } from 'lucide-react'
 import { ExpenseList } from '@/components/expenses/ExpenseList'
+import { SiteSelect, MonthSelect } from '@/components/expenses/ExpenseFilters'
 import type { Expense, Site } from '@/types'
 
 function currentYearMonth() {
@@ -113,50 +114,3 @@ export default async function ExpensesPage({
   )
 }
 
-function SiteSelect({ sites, selectedSiteId, ym }: { sites: Site[]; selectedSiteId: string; ym: string }) {
-  return (
-    <form>
-      <input type="hidden" name="month" value={ym} />
-      <select
-        name="site"
-        defaultValue={selectedSiteId}
-        className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-        onChange={(e) => {
-          const url = new URL(window.location.href)
-          url.searchParams.set('site', e.target.value)
-          window.location.href = url.toString()
-        }}
-      >
-        {sites.map((s) => (
-          <option key={s.id} value={s.id}>{s.name}</option>
-        ))}
-      </select>
-    </form>
-  )
-}
-
-function MonthSelect({ ym, siteId }: { ym: string; siteId: string }) {
-  const months: string[] = []
-  const now = new Date()
-  for (let i = 0; i < 6; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
-  }
-
-  return (
-    <select
-      defaultValue={ym}
-      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-      onChange={(e) => {
-        const url = new URL(window.location.href)
-        url.searchParams.set('month', e.target.value)
-        if (siteId) url.searchParams.set('site', siteId)
-        window.location.href = url.toString()
-      }}
-    >
-      {months.map((m) => (
-        <option key={m} value={m}>{m.replace('-', '년 ')}월</option>
-      ))}
-    </select>
-  )
-}
