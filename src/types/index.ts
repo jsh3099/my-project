@@ -47,3 +47,26 @@ export type UserSiteAssignment = {
   assigned_by: string | null
   is_active: boolean
 }
+
+export type Expense = {
+  id: string
+  site_id: string
+  user_id: string
+  year_month: string
+  category: string
+  subcategory: string
+  amount: number
+  expense_date: string
+  headcount: number
+  memo: string | null
+  status: 'draft' | 'submitted' | 'approved' | 'rejected'
+  rejection_reason: string | null
+  is_over_limit: boolean
+  over_limit_amount: number
+  receipt_urls: string[]
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  site?: Pick<Site, 'id' | 'name'>
+  profile?: Pick<Profile, 'id' | 'full_name'>
+}
