@@ -83,7 +83,7 @@ export default async function SitesPage() {
                           파라미터
                         </Button>
                       </Link>
-                      <form action={async () => { await deleteSite(site.id) }}>
+                      <form action={deleteSite.bind(null, site.id)}>
                         <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-50">
                           삭제
                         </Button>
