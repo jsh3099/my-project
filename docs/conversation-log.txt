@@ -1,0 +1,193 @@
+================================================================================
+CM 직접경비 정산 플랫폼 — 개발 대화 로그
+날짜: 2026-06-30
+참여자: 정성호 (선엔지니어링 CM본부) / Claude Sonnet 4.6
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+[1] PRD 기반 1단계 MVP 구현 계획 수립
+────────────────────────────────────────────────────────────────────────────────
+
+사용자: docs/prd.md를 기반으로 1단계 mvp 구현계획 세워줘
+
+Claude: PRD.md 분석 및 탐색 에이전트 실행 후 구현 계획 수립.
+
+[계획 내용]
+- 1단계 범위: F-01~F-04 (인증 + 현장 관리)
+- 기술 스택: Next.js 16 (App Router) + Supabase + Tailwind CSS + Vercel
+- DB 스키마: profiles, sites, site_parameters, user_site_assignments
+- RLS 정책: 역할별 접근 제어 (site_staff / hq_officer / system_admin)
+- 구현 순서: 스캐폴딩 → DB 마이그레이션 → 인증 → 현장CRUD → 파라미터 → 사용자관리
+
+계획 승인 후 구현 시작.
+
+────────────────────────────────────────────────────────────────────────────────
+[2] 프로젝트 스캐폴딩
+────────────────────────────────────────────────────────────────────────────────
+
+사용자: 실행해줘
+
+Claude: Next.js 16 초기화 진행.
+- 문제: create-next-app이 기존 파일(CLAUDE.md)로 인해 실행 거부
+- 해결: 임시 폴더(C:\cm-temp)에 생성 후 파일 복사
+
+의존성 설치:
+  npm install @supabase/supabase-js @supabase/ssr
+  npm install react-hook-form @hookform/resolvers zod lucide-react
+  npm install -D supabase
+
+생성된 파일:
+- src/lib/supabase/client.ts, server.ts, admin.ts
+- src/lib/constants.ts, src/types/index.ts
+- src/lib/validations/site.ts, siteParams.ts, user.ts
+- src/proxy.ts (Next.js 16: middleware → proxy로 변경)
+- src/actions/auth.ts, sites.ts, siteParams.ts, users.ts
+- src/components/ui/, layout/, sites/, users/
+- src/app/(auth)/login/, (dashboard)/admin/sites/, admin/users/
+- supabase/migrations/001_init_schema.sql, 002_rls_policies.sql
+
+[발견된 Next.js 16 변경사항]
+- middleware 파일명이 proxy로 변경됨
+- 함수명도 middleware → proxy로 변경 필요
+
+TypeScript 검사 통과, 빌드 성공:
+  Route (app)
+  ├ /login
+  ├ /admin/sites
+  ├ /admin/sites/[siteId]
+  ├ /admin/sites/[siteId]/params
+  ├ /admin/sites/new
+  ├ /admin/users
+  ├ /admin/users/[userId]
+  ├ /admin/users/new
+  ├ /api/auth/callback
+  └ /dashboard
+
+────────────────────────────────────────────────────────────────────────────────
+[3] dev 서버 설정 및 실행
+────────────────────────────────────────────────────────────────────────────────
+
+사용자: Detect my project's dev servers and save all their configurations to
+        .claude/launch.json, then ask which ones to start.
+
+Claude: package.json 분석 → .claude/launch.json 생성
+  {
+    "name": "Next.js Dev Server",
+    "runtimeExecutable": "npm",
+    "runtimeArgs": ["run", "dev"],
+    "port": 3000
+  }
+
+사용자 선택: 시작 → preview_start 실행 → localhost:3000 서버 기동
+
+────────────────────────────────────────────────────────────────────────────────
+[4] Supabase 연결
+────────────────────────────────────────────────────────────────────────────────
+
+사용자: Your project's URL and Key are required to create a Supabase client!
+        (환경변수 미입력으로 런타임 오류 발생)
+
+Claude: Supabase MCP로 연결된 프로젝트 조회
+  → 2개 프로젝트 확인:
+     1. 2026.6.25seon_project (zujscronutagzqywxirc)
+     2. my-project (ynbfkpydwpgqhehsixvx) ← 선택
+
+사용자: my-project
+
+Claude: MCP로 프로젝트 URL, anon key 자동 획득 → .env.local 입력
+  NEXT_PUBLIC_SUPABASE_URL=https://ynbfkpydwpgqhehsixvx.supabase.co
+  NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+
+사용자: service_role 키 위치 문의 → 대시보드 Settings > API Keys > Secret keys
+        에서 sb_secret_*** 복사 후 전달 (키는 .env.local에만 저장됨)
+
+.env.local 완성.
+
+────────────────────────────────────────────────────────────────────────────────
+[5] Supabase DB 마이그레이션 (MCP 브릿지)
+────────────────────────────────────────────────────────────────────────────────
+
+사용자: supabase my-project에 브릿지 만들어서 저장해줄수있어?
+
+Claude: Supabase MCP apply_migration 으로 직접 적용
+
+001_init_schema 적용 성공:
+  - profiles, sites, site_parameters, user_site_assignments 테이블
+  - updated_at 자동 트리거
+  - handle_new_user() 트리거 (Auth 사용자 → profiles 자동 삽입)
+
+002_rls_policies 첫 시도 실패:
+  - 원인: auth 스키마 함수 생성 권한 없음
+  - 해결: public.get_user_role(), public.is_site_member() 로 변경 후 재적용 성공
+
+────────────────────────────────────────────────────────────────────────────────
+[6] 관리자 계정 생성
+────────────────────────────────────────────────────────────────────────────────
+
+사용자: mcp로 생성해줘 이메일 jsh30996532@gmail.com, 비밀번호 1234, 이름 정성호
+
+Claude: 시도 1 - SQL INSERT into auth.users → 로그인 실패 (bcrypt 해시 방식 불일치)
+         SQL로 기존 사용자 삭제.
+
+시도 2 - PowerShell에서 Admin REST API 직접 호출 → sb_secret 키 형식 미지원 오류
+
+시도 3 - Node.js 스크립트로 Supabase JS 클라이언트 admin.createUser() 호출
+         scripts/create-admin.mjs 작성 (환경변수에서 키 읽기)
+         → 생성 완료: c1f28701-707e-4131-bdf0-86f66cd61149
+         스크립트 삭제 완료.
+
+로그인 테스트:
+  - 이메일: jsh30996532@gmail.com / 비밀번호: 1234 입력
+  - 서버 로그: POST /login 303 → GET /admin/sites 200 ✅
+  - 현재 URL: http://localhost:3000/admin/sites
+  - 사이드바: "정성호" 표시, "현장 관리" / "사용자 관리" 메뉴 확인
+
+────────────────────────────────────────────────────────────────────────────────
+[7] Git 초기화 및 GitHub 푸시
+────────────────────────────────────────────────────────────────────────────────
+
+사용자: 현재 프로젝트에 git설치해줘
+
+Claude: git init → git config user.email/name 설정
+  git commit: "feat: 1단계 MVP 초기 구현 (F-01~F-04)"
+  57 files changed, 9408 insertions(+)
+
+사용자: git허브에 푸시하고싶어 → https://github.com/jsh3099/my-project
+
+Claude: git remote add origin → PAT(ghp_...) 인증 → git push -u origin main
+  * [new branch] main -> main ✅
+  .env.local은 .gitignore로 자동 제외 (키 노출 없음)
+
+────────────────────────────────────────────────────────────────────────────────
+[8] 메모리 저장
+────────────────────────────────────────────────────────────────────────────────
+
+사용자: 메모리 저장
+
+Claude: C:\Users\user\.claude\projects\C--my-project\memory\ 에 저장
+  - user_profile.md: 정성호 / 선엔지니어링 / 이메일·역할
+  - project_status.md: 1단계 완료 현황, 2~5단계 로드맵
+  - tech_stack.md: 기술 스택, Supabase 프로젝트 정보
+  - feedback.md: Next.js 16 변경사항, Zod v4, PowerShell git 문법 등
+
+================================================================================
+현재 상태 요약 (2026-06-30)
+================================================================================
+
+완료:
+  ✅ Next.js 16 + Supabase 프로젝트 셋업
+  ✅ DB 스키마 + RLS 정책 적용
+  ✅ 로그인 / 역할 기반 접근 제어 (F-01)
+  ✅ 현장 등록·수정·삭제 (F-02)
+  ✅ 현장별 정산 기준 파라미터 설정 (F-03)
+  ✅ 사용자 등록 및 현장 배정 (F-04)
+  ✅ 관리자 계정 생성 (jsh30996532@gmail.com)
+  ✅ GitHub 푸시 (https://github.com/jsh3099/my-project)
+
+다음 단계:
+  ⬜ 2단계: F-05~F-11 직접경비 입력 (비용 입력 폼, 영수증 업로드)
+  ⬜ 3단계: F-12~F-16 자동 규정 검증 엔진
+  ⬜ 4단계: F-17~F-20 승인 워크플로
+  ⬜ 5단계: F-21~F-25 엑셀/PDF 출력
+
+================================================================================
