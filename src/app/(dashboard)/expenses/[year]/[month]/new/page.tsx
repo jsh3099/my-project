@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { ExpenseForm } from '@/components/expenses/ExpenseForm'
-import type { Site } from '@/types'
+import type { Site, SiteParameters } from '@/types'
 
 interface Props {
   params: Promise<{ year: string; month: string }>
@@ -27,8 +27,17 @@ export default async function NewExpensePage({ params }: Props) {
     .eq('is_active', true)
 
   const sites = ((assignments ?? []).map((a) => a.sites).filter(Boolean) as unknown) as Site[]
+  const siteIds = sites.map((s) => s.id)
 
-  const defaultSiteId = sites[0]?.id
+  // 현장별 파라미터 조회
+  const { data: paramsRows } = siteIds.length
+    ? await supabase.from('site_parameters').select('*').in('site_id', siteIds)
+    : { data: [] }
+
+  const paramsMap: Record<string, SiteParameters> = {}
+  for (const p of paramsRows ?? []) {
+    paramsMap[p.site_id] = p as SiteParameters
+  }
 
   return (
     <div className="p-8 max-w-2xl mx-auto">
@@ -43,9 +52,8 @@ export default async function NewExpensePage({ params }: Props) {
       <div className="rounded-lg border border-gray-200 bg-white p-6">
         <ExpenseForm
           sites={sites}
-          defaultSiteId={defaultSiteId}
-          defaultYear={year}
-          defaultMonth={month}
+          paramsMap={paramsMap}
+          userId={user.id}
         />
       </div>
     </div>

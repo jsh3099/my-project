@@ -14,6 +14,8 @@ export async function createExpense(formData: FormData) {
   const amount = parseInt(formData.get('amount') as string, 10)
   const expenseDate = formData.get('expense_date') as string
   const headcount = parseInt(formData.get('headcount') as string, 10) || 1
+  const workingDaysRaw = parseInt(formData.get('working_days') as string, 10)
+  const workingDays = isNaN(workingDaysRaw) || workingDaysRaw <= 0 ? null : workingDaysRaw
   const memo = (formData.get('memo') as string) || null
   const isOverLimit = formData.get('is_over_limit') === 'true'
   const overLimitAmount = parseInt(formData.get('over_limit_amount') as string, 10) || 0
@@ -52,6 +54,7 @@ export async function createExpense(formData: FormData) {
     amount,
     expense_date: expenseDate,
     headcount,
+    working_days: workingDays,
     memo,
     is_over_limit: isOverLimit,
     over_limit_amount: overLimitAmount,

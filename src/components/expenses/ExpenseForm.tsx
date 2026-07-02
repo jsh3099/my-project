@@ -35,6 +35,7 @@ export function ExpenseForm({ sites, paramsMap }: Props) {
   const [amount, setAmount] = useState('')
   const [expenseDate, setExpenseDate] = useState(today())
   const [headcount, setHeadcount] = useState('1')
+  const [workingDays, setWorkingDays] = useState('')
   const [memo, setMemo] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [loading, setLoading] = useState(false)
@@ -43,6 +44,7 @@ export function ExpenseForm({ sites, paramsMap }: Props) {
   const params = paramsMap[siteId]
   const mealLimit = params?.meal_allowance_daily_limit ?? 25000
   const welfareLimit = params?.welfare_monthly_limit ?? 50000
+  const commuteDailyLimit = 25000
 
   const subcategories = category ? EXPENSE_SUBCATEGORIES[category] : []
   const selectedSub = subcategories.find((s) => s.value === subcategory)
@@ -50,17 +52,23 @@ export function ExpenseForm({ sites, paramsMap }: Props) {
   // 한도 계산
   const amountNum = parseInt(amount.replace(/,/g, ''), 10) || 0
   const headcountNum = parseInt(headcount, 10) || 1
+  const workingDaysNum = parseInt(workingDays, 10) || 0
+
+  // 교통비 자동계산 금액
+  const commuteCalc = selectedSub?.limitType === 'commute' && headcountNum > 0 && workingDaysNum > 0
+    ? commuteDailyLimit * headcountNum * workingDaysNum
+    : null
 
   let limitWarning = ''
   let isOverLimit = false
   let overLimitAmount = 0
 
   if (selectedSub?.limitType === 'meal') {
-    const maxAllowed = mealLimit * headcountNum
+    const maxAllowed = mealLimit * headcountNum * (workingDaysNum || 1)
     if (amountNum > maxAllowed) {
       isOverLimit = true
       overLimitAmount = amountNum - maxAllowed
-      limitWarning = `식대 한도 초과! 1인 1일 ${mealLimit.toLocaleString()}원 × ${headcountNum}명 = ${maxAllowed.toLocaleString()}원 초과분 ${overLimitAmount.toLocaleString()}원은 불인정 처리됩니다.`
+      limitWarning = `식대 한도 초과! 1인 1일 ${mealLimit.toLocaleString()}원 × ${headcountNum}명 × ${workingDaysNum || 1}일 = ${maxAllowed.toLocaleString()}원 / 초과분 ${overLimitAmount.toLocaleString()}원은 불인정 처리됩니다.`
     }
   }
   if (selectedSub?.limitType === 'welfare') {
@@ -68,8 +76,13 @@ export function ExpenseForm({ sites, paramsMap }: Props) {
     if (amountNum > maxAllowed) {
       isOverLimit = true
       overLimitAmount = amountNum - maxAllowed
-      limitWarning = `복리후생비 한도 초과! 1인 1월 ${welfareLimit.toLocaleString()}원 × ${headcountNum}명 = ${maxAllowed.toLocaleString()}원 초과분 ${overLimitAmount.toLocaleString()}원은 불인정 처리됩니다.`
+      limitWarning = `복리후생비 한도 초과! 1인 1월 ${welfareLimit.toLocaleString()}원 × ${headcountNum}명 = ${maxAllowed.toLocaleString()}원 / 초과분 ${overLimitAmount.toLocaleString()}원은 불인정 처리됩니다.`
     }
+  }
+  if (selectedSub?.limitType === 'commute' && commuteCalc !== null && amountNum > commuteCalc) {
+    isOverLimit = true
+    overLimitAmount = amountNum - commuteCalc
+    limitWarning = `교통비 한도 초과! 25,000원 × ${headcountNum}명 × ${workingDaysNum}일 = ${commuteCalc.toLocaleString()}원 / 초과분 ${overLimitAmount.toLocaleString()}원은 불인정 처리됩니다.`
   }
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -108,6 +121,7 @@ export function ExpenseForm({ sites, paramsMap }: Props) {
     formData.append('amount', String(amountNum))
     formData.append('expense_date', expenseDate)
     formData.append('headcount', headcount)
+    formData.append('working_days', workingDays)
     formData.append('memo', memo)
     formData.append('is_over_limit', String(isOverLimit))
     formData.append('over_limit_amount', String(overLimitAmount))
@@ -252,17 +266,63 @@ export function ExpenseForm({ sites, paramsMap }: Props) {
             </div>
           </div>
 
-          {(selectedSub?.limitType === 'meal' || selectedSub?.limitType === 'welfare') && (
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">인원 수</label>
-              <input
-                type="number"
-                min="1"
-                value={headcount}
-                onChange={(e) => setHeadcount(e.target.value)}
-                className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              />
-              <span className="ml-2 text-sm text-gray-500">명</span>
+          {(selectedSub?.limitType === 'meal' || selectedSub?.limitType === 'welfare' || selectedSub?.limitType === 'commute') && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">인원 수</label>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="1"
+                      value={headcount}
+                      onChange={(e) => setHeadcount(e.target.value)}
+                      className="w-20 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    />
+                    <span className="text-sm text-gray-500">명</span>
+                  </div>
+                </div>
+                {(selectedSub?.limitType === 'meal' || selectedSub?.limitType === 'commute') && (
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">근무일수</label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={workingDays}
+                        onChange={(e) => setWorkingDays(e.target.value)}
+                        placeholder="예) 40"
+                        className="w-20 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                      />
+                      <span className="text-sm text-gray-500">일</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 교통비 자동계산 안내 */}
+              {selectedSub?.limitType === 'commute' && commuteCalc !== null && (
+                <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+                  <p className="font-semibold">📐 자동계산</p>
+                  <p className="mt-0.5">25,000원 × {headcountNum}명 × {workingDaysNum}일 = <strong>{commuteCalc.toLocaleString()}원</strong></p>
+                  <button
+                    type="button"
+                    onClick={() => setAmount(commuteCalc.toLocaleString('ko-KR'))}
+                    className="mt-1.5 rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
+                  >
+                    이 금액으로 채우기
+                  </button>
+                </div>
+              )}
+
+              {/* 식대 한도 안내 */}
+              {selectedSub?.limitType === 'meal' && headcountNum > 0 && workingDaysNum > 0 && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                  <p className="font-semibold">📐 최대 인정금액</p>
+                  <p className="mt-0.5">{mealLimit.toLocaleString()}원 × {headcountNum}명 × {workingDaysNum}일 = <strong>{(mealLimit * headcountNum * workingDaysNum).toLocaleString()}원</strong></p>
+                </div>
+              )}
             </div>
           )}
 

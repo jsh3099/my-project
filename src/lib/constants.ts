@@ -18,7 +18,7 @@ export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
 }
 
 // ── 세부항목 ────────────────────────────────────────────────
-export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; label: string; limitType?: 'meal' | 'welfare'; requireDocs: string[]; notes?: string }[]> = {
+export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; label: string; limitType?: 'meal' | 'welfare' | 'commute' | 'vehicle_maintenance'; requireDocs: string[]; notes?: string }[]> = {
   site_residence: [
     {
       value: 'lodging_rent',
@@ -40,8 +40,9 @@ export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; lab
     {
       value: 'commute',
       label: '교통비 (출퇴근)',
+      limitType: 'commute',
       requireDocs: ['출근부', '승차권 (월4회 현장↔주거지)', '자차 이용 시 통행료·연비계산서'],
-      notes: '상주기술인에 한해 적용',
+      notes: '상주기술인에 한해 적용 · 1인 1일 25,000원 × 근무일수 자동계산',
     },
     {
       value: 'office_supplies',
@@ -82,6 +83,13 @@ export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; lab
       value: 'fuel',
       label: '유류비',
       requireDocs: ['주유 영수증', '운임·통행료·주차료 영수증'],
+    },
+    {
+      value: 'vehicle_maintenance',
+      label: '차량유지비',
+      limitType: 'vehicle_maintenance',
+      requireDocs: ['주유 영수증', '정비·수리 영수증', '운행일지'],
+      notes: '인원별 실비 정산 · 근무기간에 따라 안분',
     },
   ],
   business_trip: [
