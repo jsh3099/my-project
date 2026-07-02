@@ -51,41 +51,22 @@ export type UserSiteAssignment = {
 export type Expense = {
   id: string
   site_id: string
-  submitted_by: string
-  year: number
-  month: number
+  user_id: string
+  year_month: string
   category: string
   subcategory: string
   amount: number
   expense_date: string
+  headcount: number
   memo: string | null
-  status: 'normal' | 'warning' | 'disallowed'
-  disallowed_amount: number
-  submission_status: 'draft' | 'submitted'
-  submitted_at: string | null
+  status: 'draft' | 'submitted' | 'approved' | 'rejected'
+  rejection_reason: string | null
+  is_over_limit: boolean
+  over_limit_amount: number
+  receipt_urls: string[]
   created_at: string
   updated_at: string
-}
-
-export type Receipt = {
-  id: string
-  expense_id: string
-  file_path: string
-  file_name: string
-  file_size: number
-  mime_type: string
-  uploaded_by: string | null
-  uploaded_at: string
-}
-
-export type AttendanceRecord = {
-  id: string
-  site_id: string
-  user_id: string
-  year: number
-  month: number
-  work_days: number
-  file_path: string | null
-  created_at: string
-  updated_at: string
+  deleted_at: string | null
+  site?: Pick<Site, 'id' | 'name'>
+  profile?: Pick<Profile, 'id' | 'full_name'>
 }

@@ -1,3 +1,154 @@
+// ── 비목 (대분류) ──────────────────────────────────────────
+export const EXPENSE_CATEGORIES = {
+  SITE_RESIDENCE: 'site_residence',     // 현장주재비
+  VEHICLE: 'vehicle',                   // 차량운행비
+  BUSINESS_TRIP: 'business_trip',       // 출장비
+  LOCAL_STAFF: 'local_staff',           // 현지사무원비
+  PRINTING: 'printing',                 // 도서인쇄비
+} as const
+
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[keyof typeof EXPENSE_CATEGORIES]
+
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  site_residence: '현장주재비',
+  vehicle: '차량운행비',
+  business_trip: '출장비',
+  local_staff: '현지사무원비',
+  printing: '도서인쇄비',
+}
+
+// ── 세부항목 ────────────────────────────────────────────────
+export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; label: string; limitType?: 'meal' | 'welfare'; requireDocs: string[]; notes?: string }[]> = {
+  site_residence: [
+    {
+      value: 'lodging_rent',
+      label: '숙식비 (임대비)',
+      requireDocs: ['월세·전세 계약서', '입금 확인증'],
+    },
+    {
+      value: 'lodging_maintenance',
+      label: '숙식비 (관리비)',
+      requireDocs: ['관리비 계약서', '관리비 입금 확인증'],
+    },
+    {
+      value: 'meal',
+      label: '숙식비 (식대)',
+      limitType: 'meal',
+      requireDocs: ['출근부'],
+      notes: '공무원 여비규정 적용 · 1인 1일 한도 있음',
+    },
+    {
+      value: 'commute',
+      label: '교통비 (출퇴근)',
+      requireDocs: ['출근부', '승차권 (월4회 현장↔주거지)', '자차 이용 시 통행료·연비계산서'],
+      notes: '상주기술인에 한해 적용',
+    },
+    {
+      value: 'office_supplies',
+      label: '사무용품비',
+      requireDocs: ['용품구입 영수증', '세금계산서'],
+    },
+    {
+      value: 'safety_supplies',
+      label: '안전용품비',
+      requireDocs: ['용품구입 영수증', '세금계산서'],
+    },
+    {
+      value: 'communication',
+      label: '통신비',
+      requireDocs: ['사용 영수증', '납입 확인증'],
+      notes: '⚠ 개인 휴대폰 요금은 불인정',
+    },
+    {
+      value: 'welfare',
+      label: '복리후생비',
+      limitType: 'welfare',
+      requireDocs: ['비용 산출내역서 및 확인증'],
+      notes: '음료·간식·회의비·회식 등 · 1인 1월 한도 있음',
+    },
+    {
+      value: 'office_rent',
+      label: '사무실비',
+      requireDocs: ['입금 확인증', '공과금 영수증'],
+    },
+  ],
+  vehicle: [
+    {
+      value: 'vehicle_rent',
+      label: '임대비',
+      requireDocs: ['임대 계약서', '입금 확인증'],
+    },
+    {
+      value: 'fuel',
+      label: '유류비',
+      requireDocs: ['주유 영수증', '운임·통행료·주차료 영수증'],
+    },
+  ],
+  business_trip: [
+    {
+      value: 'trip_lodging',
+      label: '숙박비',
+      requireDocs: ['숙박 영수증'],
+    },
+    {
+      value: 'trip_daily',
+      label: '일비',
+      requireDocs: [],
+      notes: '별도 증빙 불필요',
+    },
+    {
+      value: 'trip_meal',
+      label: '식비',
+      requireDocs: ['식사 영수증'],
+    },
+    {
+      value: 'trip_transport',
+      label: '교통비',
+      requireDocs: ['교통 영수증', '승차권'],
+    },
+  ],
+  local_staff: [
+    {
+      value: 'local_salary',
+      label: '현지 사무원 급여',
+      requireDocs: ['급여지출내역', '수령확인증'],
+      notes: '근로기준법 준수',
+    },
+  ],
+  printing: [
+    {
+      value: 'print_bind',
+      label: '인쇄·제본',
+      requireDocs: ['인쇄·제본 비용 영수증'],
+    },
+  ],
+}
+
+// ── 정산 상태 ─────────────────────────────────────────────
+export const EXPENSE_STATUS = {
+  DRAFT: 'draft',
+  SUBMITTED: 'submitted',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+} as const
+
+export type ExpenseStatus = (typeof EXPENSE_STATUS)[keyof typeof EXPENSE_STATUS]
+
+export const EXPENSE_STATUS_LABELS: Record<ExpenseStatus, string> = {
+  draft: '작성중',
+  submitted: '검토중',
+  approved: '승인',
+  rejected: '반려',
+}
+
+export const EXPENSE_STATUS_COLORS: Record<ExpenseStatus, string> = {
+  draft: 'gray',
+  submitted: 'yellow',
+  approved: 'green',
+  rejected: 'red',
+}
+
+// ────────────────────────────────────────────────────────────
 export const ROLES = {
   SITE_STAFF: 'site_staff',
   HQ_OFFICER: 'hq_officer',

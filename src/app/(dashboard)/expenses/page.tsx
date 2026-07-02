@@ -1,82 +1,116 @@
-import Link from 'next/link'
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { ChevronRight, Plus } from 'lucide-react'
+import { redirect } from 'next/navigation'
+import Link from 'next/link'
+import { PlusCircle } from 'lucide-react'
+import { ExpenseList } from '@/components/expenses/ExpenseList'
+import { SiteSelect, MonthSelect } from '@/components/expenses/ExpenseFilters'
+import type { Expense, Site } from '@/types'
 
-const MONTHS = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월']
+function currentYearMonth() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
 
-export default async function ExpensesPage() {
+export default async function ExpensesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ month?: string; site?: string }>
+}) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const now = new Date()
-  const currentYear = now.getFullYear()
-  const currentMonth = now.getMonth() + 1
+  const params = await searchParams
+  const ym = params.month ?? currentYearMonth()
 
-  // 최근 6개월 집계
-  const months: { year: number; month: number }[] = []
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(currentYear, currentMonth - 1 - i, 1)
-    months.push({ year: d.getFullYear(), month: d.getMonth() + 1 })
+  const { data: assignments } = await supabase
+    .from('user_site_assignments')
+    .select('site_id, sites(id, name)')
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+
+  const sites = (assignments?.map((a) => a.sites).filter(Boolean) ?? []) as unknown as Site[]
+  const selectedSiteId = params.site ?? sites[0]?.id ?? ''
+
+  let expenses: Expense[] = []
+  if (selectedSiteId) {
+    const { data } = await supabase
+      .from('expenses')
+      .select('*')
+      .eq('site_id', selectedSiteId)
+      .eq('user_id', user.id)
+      .eq('year_month', ym)
+      .is('deleted_at', null)
+      .order('expense_date', { ascending: false })
+    expenses = (data ?? []) as Expense[]
   }
 
-  // 월별 비용 합계
-  const { data: summaries } = await supabase
-    .from('expenses')
-    .select('year, month, amount, disallowed_amount, submission_status')
-    .eq('submitted_by', user.id)
-    .in('year', [...new Set(months.map((m) => m.year))])
+  const totalAmount = expenses.reduce((s, e) => s + e.amount, 0)
+  const approvedAmount = expenses
+    .filter((e) => e.status === 'approved')
+    .reduce((s, e) => s + e.amount, 0)
 
-  const summaryMap: Record<string, { total: number; submitted: number; draft: number }> = {}
-  for (const e of summaries ?? []) {
-    const key = `${e.year}_${e.month}`
-    if (!summaryMap[key]) summaryMap[key] = { total: 0, submitted: 0, draft: 0 }
-    summaryMap[key].total += e.amount - e.disallowed_amount
-    if (e.submission_status === 'submitted') summaryMap[key].submitted++
-    else summaryMap[key].draft++
-  }
+  // 제출 가능한지 (draft 항목이 1개 이상 있어야)
+  const hasDraft = expenses.some((e) => e.status === 'draft')
+  const allSubmitted = expenses.length > 0 && !hasDraft
 
   return (
-    <div className="p-8 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-gray-900">직접경비 입력</h1>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">월별 비용 내역</h1>
+          <p className="mt-1 text-sm text-gray-500">입력한 직접경비를 확인하고 본사에 제출하세요.</p>
+        </div>
         <Link
-          href={`/expenses/${currentYear}/${currentMonth}/new`}
-          className="flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+          href="/expenses/new"
+          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
         >
-          <Plus className="h-4 w-4" />
+          <PlusCircle className="h-4 w-4" />
           비용 입력
         </Link>
       </div>
 
-      <div className="space-y-3">
-        {months.map(({ year, month }) => {
-          const key = `${year}_${month}`
-          const s = summaryMap[key]
-          return (
-            <Link
-              key={key}
-              href={`/expenses/${year}/${month}`}
-              className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-5 py-4 hover:border-blue-300 hover:shadow-sm transition-all"
-            >
-              <div>
-                <p className="text-sm font-semibold text-gray-800">
-                  {year}년 {MONTHS[month - 1]}
-                </p>
-                {s ? (
-                  <p className="mt-0.5 text-xs text-gray-500">
-                    {s.total.toLocaleString()}원 · 임시저장 {s.draft}건 · 제출됨 {s.submitted}건
-                  </p>
-                ) : (
-                  <p className="mt-0.5 text-xs text-gray-400">입력 없음</p>
-                )}
-              </div>
-              <ChevronRight className="h-4 w-4 text-gray-400" />
-            </Link>
-          )
-        })}
+      {/* 필터: 현장 + 월 */}
+      <div className="flex flex-wrap gap-3 rounded-xl border border-gray-200 bg-white p-4">
+        {sites.length > 1 && (
+          <div>
+            <label className="mb-1 block text-xs text-gray-500">현장</label>
+            <SiteSelect sites={sites} selectedSiteId={selectedSiteId} ym={ym} />
+          </div>
+        )}
+        <div>
+          <label className="mb-1 block text-xs text-gray-500">월</label>
+          <MonthSelect ym={ym} siteId={selectedSiteId} />
+        </div>
       </div>
+
+      {/* 요약 */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <p className="text-xs text-gray-500">총 입력액</p>
+          <p className="mt-1 text-lg font-bold text-gray-900">{totalAmount.toLocaleString()}원</p>
+          <p className="text-xs text-gray-400">{expenses.length}건</p>
+        </div>
+        <div className="rounded-xl border border-green-200 bg-green-50 p-4">
+          <p className="text-xs text-gray-500">승인 금액</p>
+          <p className="mt-1 text-lg font-bold text-green-700">{approvedAmount.toLocaleString()}원</p>
+          <p className="text-xs text-gray-400">{expenses.filter((e) => e.status === 'approved').length}건</p>
+        </div>
+        <div className={`rounded-xl border p-4 ${allSubmitted ? 'border-yellow-200 bg-yellow-50' : 'border-gray-200 bg-white'}`}>
+          <p className="text-xs text-gray-500">상태</p>
+          <p className={`mt-1 text-lg font-bold ${allSubmitted ? 'text-yellow-600' : 'text-gray-700'}`}>
+            {allSubmitted ? '검토중' : hasDraft ? '작성중' : '없음'}
+          </p>
+        </div>
+      </div>
+
+      <ExpenseList
+        expenses={expenses}
+        siteId={selectedSiteId}
+        yearMonth={ym}
+        hasDraft={hasDraft}
+      />
     </div>
   )
 }
+

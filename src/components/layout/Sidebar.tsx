@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Building2, Users, LayoutDashboard, Receipt, CalendarCheck } from 'lucide-react'
+import { Building2, Users, LayoutDashboard, PlusCircle, ClipboardList, FileText } from 'lucide-react'
 import type { Role } from '@/lib/constants'
 
 interface SidebarProps {
@@ -13,6 +13,8 @@ interface SidebarProps {
 const adminMenus = [
   { href: '/admin/sites', icon: Building2, label: '현장 관리' },
   { href: '/admin/users', icon: Users, label: '사용자 관리' },
+  { href: '/expenses/new', icon: PlusCircle, label: '비용 입력' },
+  { href: '/expenses', icon: ClipboardList, label: '월별 내역' },
 ]
 
 const staffMenus = [
@@ -22,14 +24,23 @@ const staffMenus = [
 
 const officerMenus = [
   { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
+  { href: '/expenses/new', icon: PlusCircle, label: '비용 입력' },
+  { href: '/expenses', icon: ClipboardList, label: '월별 내역' },
+]
+
+const hqMenus = [
+  { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
+  { href: '/hq/overview', icon: FileText, label: '전체 현황' },
+  { href: '/expenses/new', icon: PlusCircle, label: '비용 입력' },
+  { href: '/expenses', icon: ClipboardList, label: '월별 내역' },
 ]
 
 export function Sidebar({ role, userName }: SidebarProps) {
   const pathname = usePathname()
   const menus =
     role === 'system_admin' ? adminMenus :
-    role === 'site_staff' ? staffMenus :
-    officerMenus
+    role === 'hq_officer' ? hqMenus :
+    staffMenus
 
   return (
     <aside className="flex h-screen w-60 flex-col border-r border-gray-200 bg-white">
@@ -39,7 +50,7 @@ export function Sidebar({ role, userName }: SidebarProps) {
 
       <nav className="flex-1 space-y-1 px-3 py-4">
         {menus.map((menu) => {
-          const isActive = pathname.startsWith(menu.href)
+          const isActive = pathname === menu.href || (menu.href !== '/dashboard' && pathname.startsWith(menu.href))
           return (
             <Link
               key={menu.href}

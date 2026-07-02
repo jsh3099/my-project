@@ -1,11 +1,11 @@
-{
+﻿{
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "Next.js Dev Server",
+      "name": "jsh3099-my-project",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 3000
+      "port": 3001
     }
   ]
 }

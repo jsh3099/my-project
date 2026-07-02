@@ -1,145 +1,98 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { expenseSchema } from '@/lib/validations/expense'
-import { LIMIT_RULES } from '@/lib/expense-categories'
 
-export async function createExpense(submissionStatus: 'draft' | 'submitted', formData: FormData) {
+export async function createExpense(formData: FormData) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: '인증이 필요합니다.' }
+  if (!user) return { error: '로그인이 필요합니다.' }
 
-  const raw = {
-    site_id: formData.get('site_id'),
-    year: formData.get('year'),
-    month: formData.get('month'),
-    category: formData.get('category'),
-    subcategory: formData.get('subcategory'),
-    amount: formData.get('amount'),
-    expense_date: formData.get('expense_date'),
-    memo: formData.get('memo') || undefined,
-    submission_status: submissionStatus,
+  const siteId = formData.get('site_id') as string
+  const yearMonth = formData.get('year_month') as string
+  const category = formData.get('category') as string
+  const subcategory = formData.get('subcategory') as string
+  const amount = parseInt(formData.get('amount') as string, 10)
+  const expenseDate = formData.get('expense_date') as string
+  const headcount = parseInt(formData.get('headcount') as string, 10) || 1
+  const memo = (formData.get('memo') as string) || null
+  const isOverLimit = formData.get('is_over_limit') === 'true'
+  const overLimitAmount = parseInt(formData.get('over_limit_amount') as string, 10) || 0
+
+  if (!siteId || !category || !subcategory || !amount || !expenseDate) {
+    return { error: '필수 항목을 모두 입력해주세요.' }
   }
 
-  const parsed = expenseSchema.safeParse(raw)
-  if (!parsed.success) return { error: parsed.error.issues[0].message }
+  // 영수증 파일 업로드
+  const files = formData.getAll('receipts') as File[]
+  const receiptUrls: string[] = []
 
-  const { category, subcategory, amount, year, month, site_id } = parsed.data
+  for (const file of files) {
+    if (!file.size) continue
+    const ext = file.name.split('.').pop()
+    const path = `receipts/${user.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+    const { error: uploadError } = await supabase.storage
+      .from('receipts')
+      .upload(path, file, { contentType: file.type })
 
-  // 한도 검증 (F-08)
-  let status: 'normal' | 'warning' | 'disallowed' = 'normal'
-  let disallowed_amount = 0
-  const limitRule = LIMIT_RULES[subcategory]
-
-  if (limitRule) {
-    // 해당 월 누적 금액 조회
-    const { data: existing } = await supabase
-      .from('expenses')
-      .select('amount, disallowed_amount')
-      .eq('site_id', site_id)
-      .eq('year', year)
-      .eq('month', month)
-      .eq('subcategory', subcategory)
-      .neq('status', 'disallowed')
-
-    const accumulated = (existing ?? []).reduce((sum, e) => sum + e.amount - e.disallowed_amount, 0)
-    const total = accumulated + amount
-
-    if (limitRule.type === 'monthly_per_person' && total > limitRule.limit) {
-      const over = total - limitRule.limit
-      disallowed_amount = Math.min(amount, over)
-      status = disallowed_amount >= amount ? 'disallowed' : 'warning'
+    if (uploadError) {
+      console.error('Upload error:', uploadError)
+      continue
     }
+
+    const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(path)
+    receiptUrls.push(urlData.publicUrl)
   }
 
   const { error } = await supabase.from('expenses').insert({
-    ...parsed.data,
-    submitted_by: user.id,
-    status,
-    disallowed_amount,
-    submitted_at: submissionStatus === 'submitted' ? new Date().toISOString() : null,
+    site_id: siteId,
+    user_id: user.id,
+    year_month: yearMonth,
+    category,
+    subcategory,
+    amount,
+    expense_date: expenseDate,
+    headcount,
+    memo,
+    is_over_limit: isOverLimit,
+    over_limit_amount: overLimitAmount,
+    receipt_urls: receiptUrls,
+    status: 'draft',
   })
 
-  if (error) return { error: '비용 저장에 실패했습니다: ' + error.message }
-
-  revalidatePath(`/expenses/${year}/${month}`)
-  if (submissionStatus === 'submitted') {
-    redirect(`/expenses/${year}/${month}`)
-  }
+  if (error) return { error: `저장 실패: ${error.message}` }
   return { success: true }
 }
 
-export async function updateExpense(expenseId: string, formData: FormData) {
+export async function deleteExpense(id: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: '인증이 필요합니다.' }
-
-  const raw = {
-    site_id: formData.get('site_id'),
-    year: formData.get('year'),
-    month: formData.get('month'),
-    category: formData.get('category'),
-    subcategory: formData.get('subcategory'),
-    amount: formData.get('amount'),
-    expense_date: formData.get('expense_date'),
-    memo: formData.get('memo') || undefined,
-    submission_status: 'draft',
-  }
-
-  const parsed = expenseSchema.safeParse(raw)
-  if (!parsed.success) return { error: parsed.error.issues[0].message }
+  if (!user) return { error: '로그인이 필요합니다.' }
 
   const { error } = await supabase
     .from('expenses')
-    .update(parsed.data)
-    .eq('id', expenseId)
-    .eq('submitted_by', user.id)
-    .eq('submission_status', 'draft')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .eq('status', 'draft')
 
-  if (error) return { error: '수정에 실패했습니다: ' + error.message }
-
-  revalidatePath(`/expenses/${parsed.data.year}/${parsed.data.month}`)
+  if (error) return { error: error.message }
   return { success: true }
 }
 
-export async function deleteExpense(expenseId: string) {
+export async function submitExpenses(siteId: string, yearMonth: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: '인증이 필요합니다.' }
+  if (!user) return { error: '로그인이 필요합니다.' }
 
   const { error } = await supabase
     .from('expenses')
-    .delete()
-    .eq('id', expenseId)
-    .eq('submitted_by', user.id)
-    .eq('submission_status', 'draft')
-
-  if (error) return { error: '삭제에 실패했습니다: ' + error.message }
-
-  revalidatePath('/expenses')
-}
-
-export async function submitExpenses(siteId: string, year: number, month: number) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: '인증이 필요합니다.' }
-
-  const { error } = await supabase
-    .from('expenses')
-    .update({
-      submission_status: 'submitted',
-      submitted_at: new Date().toISOString(),
-    })
+    .update({ status: 'submitted' })
     .eq('site_id', siteId)
-    .eq('submitted_by', user.id)
-    .eq('year', year)
-    .eq('month', month)
-    .eq('submission_status', 'draft')
+    .eq('user_id', user.id)
+    .eq('year_month', yearMonth)
+    .eq('status', 'draft')
+    .is('deleted_at', null)
 
-  if (error) return { error: '제출에 실패했습니다: ' + error.message }
-
-  revalidatePath(`/expenses/${year}/${month}`)
+  if (error) return { error: error.message }
   return { success: true }
 }
