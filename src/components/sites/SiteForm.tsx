@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
@@ -19,19 +19,24 @@ const statusOptions = [
 ]
 
 export function SiteForm({ site, action }: SiteFormProps) {
-  const [state, formAction, pending] = useActionState(
-    async (_: { error: string } | null, formData: FormData) => {
+  const [error, setError] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const formData = new FormData(e.currentTarget)
+    setError(null)
+    startTransition(async () => {
       const result = await action(formData)
-      return result ?? null
-    },
-    null
-  )
+      if (result && 'error' in result) setError(result.error)
+    })
+  }
 
   return (
-    <form action={formAction} className="space-y-5">
-      {state?.error && (
+    <form onSubmit={handleSubmit} className="space-y-5">
+      {error && (
         <div className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">
-          {state.error}
+          {error}
         </div>
       )}
 
@@ -99,7 +104,7 @@ export function SiteForm({ site, action }: SiteFormProps) {
         <Link href="/admin/sites">
           <Button type="button" variant="secondary">취소</Button>
         </Link>
-        <Button type="submit" loading={pending}>
+        <Button type="submit" loading={isPending}>
           {site ? '수정 저장' : '현장 등록'}
         </Button>
       </div>

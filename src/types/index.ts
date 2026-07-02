@@ -47,3 +47,45 @@ export type UserSiteAssignment = {
   assigned_by: string | null
   is_active: boolean
 }
+
+export type Expense = {
+  id: string
+  site_id: string
+  submitted_by: string
+  year: number
+  month: number
+  category: string
+  subcategory: string
+  amount: number
+  expense_date: string
+  memo: string | null
+  status: 'normal' | 'warning' | 'disallowed'
+  disallowed_amount: number
+  submission_status: 'draft' | 'submitted'
+  submitted_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type Receipt = {
+  id: string
+  expense_id: string
+  file_path: string
+  file_name: string
+  file_size: number
+  mime_type: string
+  uploaded_by: string | null
+  uploaded_at: string
+}
+
+export type AttendanceRecord = {
+  id: string
+  site_id: string
+  user_id: string
+  year: number
+  month: number
+  work_days: number
+  file_path: string | null
+  created_at: string
+  updated_at: string
+}

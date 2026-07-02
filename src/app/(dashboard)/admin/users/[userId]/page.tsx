@@ -63,7 +63,7 @@ export default async function UserDetailPage({ params }: Props) {
                   <Badge variant={site.status === 'active' ? 'green' : 'gray'}>
                     {SITE_STATUS_LABELS[site.status as keyof typeof SITE_STATUS_LABELS]}
                   </Badge>
-                  <form action={async () => { await unassignSite(userId, site.id) }}>
+                  <form action={unassignSite.bind(null, userId, site.id) as never}>
                     <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-50">
                       <UserX className="h-4 w-4" />
                       배정 해제
@@ -86,7 +86,7 @@ export default async function UserDetailPage({ params }: Props) {
                   <p className="text-sm font-medium text-gray-800">{site.name}</p>
                   <p className="text-xs text-gray-500">{site.client_name}</p>
                 </div>
-                <form action={async () => { await assignSite(userId, site.id) }}>
+                <form action={assignSite.bind(null, userId, site.id) as never}>
                   <Button variant="secondary" size="sm">
                     <UserCheck className="h-4 w-4" />
                     배정

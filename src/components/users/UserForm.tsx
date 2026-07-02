@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
@@ -17,19 +17,24 @@ const roleOptions = [
 ]
 
 export function UserForm({ action }: UserFormProps) {
-  const [state, formAction, pending] = useActionState(
-    async (_: { error: string } | null, formData: FormData) => {
+  const [error, setError] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const formData = new FormData(e.currentTarget)
+    setError(null)
+    startTransition(async () => {
       const result = await action(formData)
-      return result ?? null
-    },
-    null
-  )
+      if (result && 'error' in result) setError(result.error)
+    })
+  }
 
   return (
-    <form action={formAction} className="space-y-5">
-      {state?.error && (
+    <form onSubmit={handleSubmit} className="space-y-5">
+      {error && (
         <div className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">
-          {state.error}
+          {error}
         </div>
       )}
 
@@ -66,7 +71,7 @@ export function UserForm({ action }: UserFormProps) {
         <Link href="/admin/users">
           <Button type="button" variant="secondary">취소</Button>
         </Link>
-        <Button type="submit" loading={pending}>사용자 등록</Button>
+        <Button type="submit" loading={isPending}>사용자 등록</Button>
       </div>
     </form>
   )

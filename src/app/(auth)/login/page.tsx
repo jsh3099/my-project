@@ -9,9 +9,11 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  async function handleSubmit(formData: FormData) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
     setError(null)
     setLoading(true)
+    const formData = new FormData(e.currentTarget)
     const result = await login(formData)
     if (result?.error) {
       setError(result.error)
@@ -26,7 +28,7 @@ export default function LoginPage() {
         <p className="mt-1 text-sm text-gray-500">선엔지니어링 건설사업관리본부</p>
       </div>
 
-      <form action={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <Input
           label="이메일"
           name="email"

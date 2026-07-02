@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useActionState } from 'react'
+import { useState, useTransition } from 'react'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
@@ -18,28 +18,32 @@ const travelGradeOptions = [1, 2, 3, 4, 5].map((n) => ({
 }))
 
 export function SiteParamsForm({ params, action }: SiteParamsFormProps) {
+  const [error, setError] = useState<string | null>(null)
   const [showToast, setShowToast] = useState(false)
   const [applyCommute, setApplyCommute] = useState(params?.apply_commute_regulation ?? true)
+  const [isPending, startTransition] = useTransition()
 
-  const [state, formAction, pending] = useActionState(
-    async (_: { error: string } | null, formData: FormData) => {
-      formData.set('apply_commute_regulation', String(applyCommute))
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const formData = new FormData(e.currentTarget)
+    formData.set('apply_commute_regulation', String(applyCommute))
+    setError(null)
+    startTransition(async () => {
       const result = await action(formData)
       if ('success' in result) {
         setShowToast(true)
         setTimeout(() => setShowToast(false), 3000)
-        return null
+      } else {
+        setError(result.error)
       }
-      return result
-    },
-    null
-  )
+    })
+  }
 
   return (
-    <form action={formAction} className="space-y-6">
-      {state?.error && (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {error && (
         <div className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">
-          {state.error}
+          {error}
         </div>
       )}
 
@@ -117,7 +121,7 @@ export function SiteParamsForm({ params, action }: SiteParamsFormProps) {
       </section>
 
       <div className="flex justify-end pt-2">
-        <Button type="submit" loading={pending}>설정 저장</Button>
+        <Button type="submit" loading={isPending}>설정 저장</Button>
       </div>
     </form>
   )

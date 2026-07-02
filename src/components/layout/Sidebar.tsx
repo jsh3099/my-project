@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Building2, Users, LayoutDashboard, Settings } from 'lucide-react'
+import { Building2, Users, LayoutDashboard, Receipt, CalendarCheck } from 'lucide-react'
 import type { Role } from '@/lib/constants'
 
 interface SidebarProps {
@@ -16,12 +16,20 @@ const adminMenus = [
 ]
 
 const staffMenus = [
+  { href: '/expenses', icon: Receipt, label: '직접경비 입력' },
+  { href: '/attendance', icon: CalendarCheck, label: '출근부' },
+]
+
+const officerMenus = [
   { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
 ]
 
 export function Sidebar({ role, userName }: SidebarProps) {
   const pathname = usePathname()
-  const menus = role === 'system_admin' ? adminMenus : staffMenus
+  const menus =
+    role === 'system_admin' ? adminMenus :
+    role === 'site_staff' ? staffMenus :
+    officerMenus
 
   return (
     <aside className="flex h-screen w-60 flex-col border-r border-gray-200 bg-white">
