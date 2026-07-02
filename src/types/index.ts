@@ -48,6 +48,18 @@ export type UserSiteAssignment = {
   is_active: boolean
 }
 
+export type AttendanceRecord = {
+  id: string
+  site_id: string
+  user_id: string
+  year: number
+  month: number
+  work_days: number
+  file_path: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type Expense = {
   id: string
   site_id: string

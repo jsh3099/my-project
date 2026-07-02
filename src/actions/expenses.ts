@@ -82,6 +82,87 @@ export async function deleteExpense(id: string) {
   return { success: true }
 }
 
+export interface StaffCostRow {
+  userId: string
+  userName: string
+  workDays: number
+  lodgingRent: number
+  lodgingMaintenance: number
+  commute: number
+  businessTrip: number
+}
+
+export async function createStaffCosts(
+  siteId: string,
+  yearMonth: string,
+  rows: StaffCostRow[],
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const today = new Date().toISOString().split('T')[0]
+  const mealLimit = 25000
+  const records: object[] = []
+
+  for (const row of rows) {
+    if (row.workDays > 0) {
+      const mealAmount = row.workDays * mealLimit
+      records.push({
+        site_id: siteId, user_id: user.id, year_month: yearMonth,
+        category: 'site_residence', subcategory: 'meal',
+        amount: mealAmount, expense_date: today,
+        headcount: 1, working_days: row.workDays,
+        target_user_name: row.userName,
+        is_over_limit: false, over_limit_amount: 0, status: 'draft',
+      })
+    }
+    if (row.lodgingRent > 0) {
+      records.push({
+        site_id: siteId, user_id: user.id, year_month: yearMonth,
+        category: 'site_residence', subcategory: 'lodging_rent',
+        amount: row.lodgingRent, expense_date: today,
+        headcount: 1, target_user_name: row.userName,
+        is_over_limit: false, over_limit_amount: 0, status: 'draft',
+      })
+    }
+    if (row.lodgingMaintenance > 0) {
+      records.push({
+        site_id: siteId, user_id: user.id, year_month: yearMonth,
+        category: 'site_residence', subcategory: 'lodging_maintenance',
+        amount: row.lodgingMaintenance, expense_date: today,
+        headcount: 1, target_user_name: row.userName,
+        is_over_limit: false, over_limit_amount: 0, status: 'draft',
+      })
+    }
+    if (row.commute > 0) {
+      records.push({
+        site_id: siteId, user_id: user.id, year_month: yearMonth,
+        category: 'site_residence', subcategory: 'commute',
+        amount: row.commute, expense_date: today,
+        headcount: 1, working_days: row.workDays,
+        target_user_name: row.userName,
+        is_over_limit: false, over_limit_amount: 0, status: 'draft',
+      })
+    }
+    if (row.businessTrip > 0) {
+      records.push({
+        site_id: siteId, user_id: user.id, year_month: yearMonth,
+        category: 'business_trip', subcategory: 'trip_transport',
+        amount: row.businessTrip, expense_date: today,
+        headcount: 1, target_user_name: row.userName,
+        is_over_limit: false, over_limit_amount: 0, status: 'draft',
+      })
+    }
+  }
+
+  if (records.length === 0) return { error: '입력된 금액이 없습니다.' }
+
+  const { error } = await supabase.from('expenses').insert(records)
+  if (error) return { error: `저장 실패: ${error.message}` }
+  return { success: true }
+}
+
 export async function submitExpenses(siteId: string, yearMonth: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

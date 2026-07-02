@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Building2, Users, LayoutDashboard, PlusCircle, ClipboardList, FileText, Receipt, CalendarCheck } from 'lucide-react'
+import { Building2, Users, LayoutDashboard, PlusCircle, ClipboardList, FileText, Receipt, CalendarCheck, UsersRound, ListOrdered } from 'lucide-react'
 import type { Role } from '@/lib/constants'
 
 interface SidebarProps {
@@ -18,7 +18,10 @@ const adminMenus = [
 ]
 
 const staffMenus = [
-  { href: '/expenses', icon: Receipt, label: '직접경비 입력' },
+  { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
+  { href: '/expenses/staff-costs', icon: UsersRound, label: '인원별 주재비' },
+  { href: '/expenses/new', icon: PlusCircle, label: '직접경비 입력' },
+  { href: '/expenses', icon: ListOrdered, label: '월별 내역' },
   { href: '/attendance', icon: CalendarCheck, label: '출근부' },
 ]
 
