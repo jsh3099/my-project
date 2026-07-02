@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Building2, Users, LayoutDashboard, PlusCircle, ClipboardList, FileText } from 'lucide-react'
+import { Building2, Users, LayoutDashboard, PlusCircle, ClipboardList, FileText, Receipt, CalendarCheck } from 'lucide-react'
 import type { Role } from '@/lib/constants'
 
 interface SidebarProps {
