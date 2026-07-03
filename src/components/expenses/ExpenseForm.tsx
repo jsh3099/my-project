@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   EXPENSE_CATEGORIES,
@@ -40,6 +40,7 @@ export function ExpenseForm({ sites, paramsMap }: Props) {
   const [files, setFiles] = useState<File[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [staffCostSuggestion, setStaffCostSuggestion] = useState<number | null>(null)
 
   const params = paramsMap[siteId]
   const mealLimit = params?.meal_allowance_daily_limit ?? 25000
@@ -48,6 +49,26 @@ export function ExpenseForm({ sites, paramsMap }: Props) {
 
   const subcategories = category ? EXPENSE_SUBCATEGORIES[category] : []
   const selectedSub = subcategories.find((s) => s.value === subcategory)
+
+  // 인원별 주재비에서 입력한 금액 읽기
+  useEffect(() => {
+    if (!subcategory || !siteId) { setStaffCostSuggestion(null); return }
+    const ym = currentYearMonth()
+    const stored = localStorage.getItem(`staffcost_${siteId}_${ym}`)
+    if (!stored) { setStaffCostSuggestion(null); return }
+    try {
+      const data = JSON.parse(stored)
+      const MAP: Record<string, keyof typeof data> = {
+        lodging_rent: 'lodgingRent',
+        lodging_maintenance: 'lodgingMaintenance',
+        meal: 'meal',
+        commute: 'commute',
+      }
+      const field = MAP[subcategory]
+      const val = field ? data[field] : 0
+      setStaffCostSuggestion(val > 0 ? val : null)
+    } catch { setStaffCostSuggestion(null) }
+  }, [subcategory, siteId])
 
   // 한도 계산
   const amountNum = parseInt(amount.replace(/,/g, ''), 10) || 0
@@ -105,10 +126,6 @@ export function ExpenseForm({ sites, paramsMap }: Props) {
     e.preventDefault()
     if (!category || !subcategory) { setError('비목과 세부항목을 선택해주세요.'); return }
     if (!amountNum) { setError('금액을 입력해주세요.'); return }
-    if (selectedSub && selectedSub.requireDocs.length > 0 && files.length === 0) {
-      setError('필수 증빙자료를 업로드해주세요.')
-      return
-    }
 
     setLoading(true)
     setError('')
@@ -234,35 +251,42 @@ export function ExpenseForm({ sites, paramsMap }: Props) {
         <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
           <p className="text-sm font-semibold text-gray-700">상세 입력</p>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                금액 <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={amount}
-                  onChange={handleAmountChange}
-                  placeholder="0"
-                  className={`w-full rounded-lg border px-3 py-2 pr-8 text-right text-sm focus:outline-none focus:ring-2 ${
-                    isOverLimit ? 'border-red-400 bg-red-50 focus:ring-red-300' : 'border-gray-300 focus:ring-blue-300'
-                  }`}
-                />
-                <span className="absolute right-3 top-2 text-sm text-gray-400">원</span>
+          {/* 인원별 주재비 자동 매칭 안내 */}
+          {staffCostSuggestion !== null && (
+            <div className="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-green-800">
+                  📋 인원별 주재비 입력 금액 감지
+                </p>
+                <p className="mt-0.5 text-sm text-green-700">
+                  이번 달 합계 <strong>{staffCostSuggestion.toLocaleString()}원</strong>이 입력되어 있습니다.
+                </p>
               </div>
+              <button
+                type="button"
+                onClick={() => setAmount(staffCostSuggestion.toLocaleString('ko-KR'))}
+                className="ml-4 shrink-0 rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700"
+              >
+                자동 입력
+              </button>
             </div>
+          )}
 
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                날짜 <span className="text-red-500">*</span>
-              </label>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              금액 <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
               <input
-                type="date"
-                value={expenseDate}
-                onChange={(e) => setExpenseDate(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                type="text"
+                value={amount}
+                onChange={handleAmountChange}
+                placeholder="0"
+                className={`w-full rounded-lg border px-3 py-2 pr-8 text-right text-sm focus:outline-none focus:ring-2 ${
+                  isOverLimit ? 'border-red-400 bg-red-50 focus:ring-red-300' : 'border-gray-300 focus:ring-blue-300'
+                }`}
               />
+              <span className="absolute right-3 top-2 text-sm text-gray-400">원</span>
             </div>
           </div>
 
@@ -346,42 +370,10 @@ export function ExpenseForm({ sites, paramsMap }: Props) {
         </div>
       )}
 
-      {/* STEP 5: 영수증 업로드 */}
+      {/* 영수증은 인원별 주재비에서 첨부 */}
       {subcategory && (
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <p className="mb-3 text-sm font-semibold text-gray-700">
-            영수증 업로드
-            {selectedSub && selectedSub.requireDocs.length > 0 && (
-              <span className="text-red-500"> *</span>
-            )}
-          </p>
-          <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 py-8 transition hover:border-blue-400 hover:bg-blue-50">
-            <span className="text-2xl">📎</span>
-            <span className="mt-2 text-sm font-medium text-gray-700">파일 선택 또는 여기에 드래그</span>
-            <span className="mt-1 text-xs text-gray-400">JPG, PNG, PDF · 파일당 최대 10MB · 카메라 촬영 가능</span>
-            <input
-              type="file"
-              multiple
-              accept=".jpg,.jpeg,.png,.pdf"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-          </label>
-
-          {files.length > 0 && (
-            <ul className="mt-3 space-y-2">
-              {files.map((f, i) => (
-                <li key={i} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm">
-                  <span className="truncate text-gray-700">{f.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeFile(i)}
-                    className="ml-3 text-gray-400 hover:text-red-500"
-                  >✕</button>
-                </li>
-              ))}
-            </ul>
-          )}
+        <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+          📎 영수증은 <strong>인원별 주재비</strong> 화면에서 항목별로 첨부해주세요.
         </div>
       )}
 

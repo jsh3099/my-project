@@ -21,7 +21,6 @@ const staffMenus = [
   { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
   { href: '/expenses/staff-costs', icon: UsersRound, label: '인원별 주재비' },
   { href: '/expenses/new', icon: PlusCircle, label: '직접경비 입력' },
-  { href: '/expenses', icon: ListOrdered, label: '월별 내역' },
   { href: '/attendance', icon: CalendarCheck, label: '출근부' },
 ]
 

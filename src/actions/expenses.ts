@@ -1,9 +1,11 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function createExpense(formData: FormData) {
   const supabase = await createClient()
+  const admin = createAdminClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: '로그인이 필요합니다.' }
 
@@ -45,10 +47,12 @@ export async function createExpense(formData: FormData) {
     receiptUrls.push(urlData.publicUrl)
   }
 
-  const { error } = await supabase.from('expenses').insert({
+  const { error } = await admin.from('expenses').insert({
     site_id: siteId,
+    submitted_by: user.id,
     user_id: user.id,
-    year_month: yearMonth,
+    year: parseInt(yearMonth.split('-')[0]),
+    month: parseInt(yearMonth.split('-')[1]),
     category,
     subcategory,
     amount,
@@ -98,67 +102,37 @@ export async function createStaffCosts(
   rows: StaffCostRow[],
 ) {
   const supabase = await createClient()
+  const admin = createAdminClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: '로그인이 필요합니다.' }
 
   const today = new Date().toISOString().split('T')[0]
   const mealLimit = 25000
+  const [yr, mo] = yearMonth.split('-').map(Number)
   const records: object[] = []
+  const base = { site_id: siteId, submitted_by: user.id, user_id: user.id, year: yr, month: mo, status: 'draft', is_over_limit: false, over_limit_amount: 0, expense_date: today, headcount: 1 }
 
   for (const row of rows) {
     if (row.workDays > 0) {
-      const mealAmount = row.workDays * mealLimit
-      records.push({
-        site_id: siteId, user_id: user.id, year_month: yearMonth,
-        category: 'site_residence', subcategory: 'meal',
-        amount: mealAmount, expense_date: today,
-        headcount: 1, working_days: row.workDays,
-        target_user_name: row.userName,
-        is_over_limit: false, over_limit_amount: 0, status: 'draft',
-      })
+      records.push({ ...base, category: 'site_residence', subcategory: 'meal', amount: row.workDays * mealLimit, working_days: row.workDays, target_user_name: row.userName })
     }
     if (row.lodgingRent > 0) {
-      records.push({
-        site_id: siteId, user_id: user.id, year_month: yearMonth,
-        category: 'site_residence', subcategory: 'lodging_rent',
-        amount: row.lodgingRent, expense_date: today,
-        headcount: 1, target_user_name: row.userName,
-        is_over_limit: false, over_limit_amount: 0, status: 'draft',
-      })
+      records.push({ ...base, category: 'site_residence', subcategory: 'lodging_rent', amount: row.lodgingRent, target_user_name: row.userName })
     }
     if (row.lodgingMaintenance > 0) {
-      records.push({
-        site_id: siteId, user_id: user.id, year_month: yearMonth,
-        category: 'site_residence', subcategory: 'lodging_maintenance',
-        amount: row.lodgingMaintenance, expense_date: today,
-        headcount: 1, target_user_name: row.userName,
-        is_over_limit: false, over_limit_amount: 0, status: 'draft',
-      })
+      records.push({ ...base, category: 'site_residence', subcategory: 'lodging_maintenance', amount: row.lodgingMaintenance, target_user_name: row.userName })
     }
     if (row.commute > 0) {
-      records.push({
-        site_id: siteId, user_id: user.id, year_month: yearMonth,
-        category: 'site_residence', subcategory: 'commute',
-        amount: row.commute, expense_date: today,
-        headcount: 1, working_days: row.workDays,
-        target_user_name: row.userName,
-        is_over_limit: false, over_limit_amount: 0, status: 'draft',
-      })
+      records.push({ ...base, category: 'site_residence', subcategory: 'commute', amount: row.commute, working_days: row.workDays, target_user_name: row.userName })
     }
     if (row.businessTrip > 0) {
-      records.push({
-        site_id: siteId, user_id: user.id, year_month: yearMonth,
-        category: 'business_trip', subcategory: 'trip_transport',
-        amount: row.businessTrip, expense_date: today,
-        headcount: 1, target_user_name: row.userName,
-        is_over_limit: false, over_limit_amount: 0, status: 'draft',
-      })
+      records.push({ ...base, category: 'business_trip', subcategory: 'trip_transport', amount: row.businessTrip, target_user_name: row.userName })
     }
   }
 
   if (records.length === 0) return { error: '입력된 금액이 없습니다.' }
 
-  const { error } = await supabase.from('expenses').insert(records)
+  const { error } = await admin.from('expenses').insert(records)
   if (error) return { error: `저장 실패: ${error.message}` }
   return { success: true }
 }
