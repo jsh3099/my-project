@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useRef, useEffect } from 'react'
+import { useState, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createStaffCosts, type StaffCostRow } from '@/actions/expenses'
 import type { Profile, AttendanceRecord } from '@/types'
@@ -260,17 +260,6 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
   }, { meal: 0, commute: 0, lodgingRent: 0, lodgingMaintenance: 0 })
   const grandTotal = totals.meal + totals.commute + totals.lodgingRent + totals.lodgingMaintenance
   const totalWorkDays = [...users.map((u) => rows[u.id]), ...extraRows].reduce((s, r) => s + (parseInt(r?.workDays ?? '0') || 0), 0)
-
-  // 숙소임대비·관리비 합계를 localStorage에 저장 → 직접경비 입력과 연동
-  useEffect(() => {
-    const key = `staffcost_${siteId}_${yearMonth}`
-    localStorage.setItem(key, JSON.stringify({
-      lodgingRent: totals.lodgingRent,
-      lodgingMaintenance: totals.lodgingMaintenance,
-      meal: totals.meal,
-      commute: totals.commute,
-    }))
-  }, [totals.lodgingRent, totals.lodgingMaintenance, totals.meal, totals.commute, siteId, yearMonth])
 
   function handleSave() {
     setError(null)

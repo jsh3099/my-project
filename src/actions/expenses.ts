@@ -53,6 +53,7 @@ export async function createExpense(formData: FormData) {
     user_id: user.id,
     year: parseInt(yearMonth.split('-')[0]),
     month: parseInt(yearMonth.split('-')[1]),
+    year_month: yearMonth,
     category,
     subcategory,
     amount,
@@ -110,7 +111,7 @@ export async function createStaffCosts(
   const mealLimit = 25000
   const [yr, mo] = yearMonth.split('-').map(Number)
   const records: object[] = []
-  const base = { site_id: siteId, submitted_by: user.id, user_id: user.id, year: yr, month: mo, status: 'draft', is_over_limit: false, over_limit_amount: 0, expense_date: today, headcount: 1 }
+  const base = { site_id: siteId, submitted_by: user.id, user_id: user.id, year: yr, month: mo, year_month: yearMonth, status: 'draft', is_over_limit: false, over_limit_amount: 0, expense_date: today, headcount: 1 }
 
   for (const row of rows) {
     if (row.workDays > 0) {
@@ -131,6 +132,18 @@ export async function createStaffCosts(
   }
 
   if (records.length === 0) return { error: '입력된 금액이 없습니다.' }
+
+  // 이 화면에서 이전에 저장한 draft 항목을 지우고 새로 채워 넣어, 재저장 시 중복 누적되지 않게 한다.
+  const { error: clearError } = await admin
+    .from('expenses')
+    .delete()
+    .eq('site_id', siteId)
+    .eq('year', yr)
+    .eq('month', mo)
+    .eq('status', 'draft')
+    .in('category', ['site_residence', 'business_trip'])
+    .not('target_user_name', 'is', null)
+  if (clearError) return { error: `저장 실패: ${clearError.message}` }
 
   const { error } = await admin.from('expenses').insert(records)
   if (error) return { error: `저장 실패: ${error.message}` }
