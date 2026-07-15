@@ -27,6 +27,7 @@ export default async function MonthlyExpensePage({ params }: Props) {
     .eq('submitted_by', user.id)
     .eq('year', year)
     .eq('month', month)
+    .is('deleted_at', null)
     .order('expense_date', { ascending: true })
 
   // 사용자 소속 현장의 예산 (첫번째 현장 기준)

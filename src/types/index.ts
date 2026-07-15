@@ -70,6 +70,8 @@ export type Expense = {
   amount: number
   expense_date: string
   headcount: number
+  target_user_id: string | null
+  target_user_name: string | null
   memo: string | null
   status: 'draft' | 'submitted' | 'approved' | 'rejected'
   rejection_reason: string | null

@@ -44,6 +44,13 @@ const CATEGORY_COLORS: Record<ReceiptCategory, string> = {
   '식비':      'bg-green-100 text-green-700',
   '교통비':    'bg-blue-100 text-blue-700',
 }
+// 영수증 비목 라벨 → expenses.subcategory 값 매핑 (서버 액션에 전달할 때 사용)
+const CATEGORY_TO_SUBCATEGORY: Record<ReceiptCategory, string> = {
+  '숙소임대비': 'lodging_rent',
+  '관리비':    'lodging_maintenance',
+  '식비':      'meal',
+  '교통비':    'commute',
+}
 
 type AttachedFile = { file: File; preview: string | null; category: ReceiptCategory }
 type Row = { periodStart: string; periodEnd: string; workDays: string; lodgingRent: string; lodgingMaintenance: string; commutePerDay: string; specialty: string }
@@ -266,15 +273,27 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
     const payload: StaffCostRow[] = [
       ...users.map((u) => {
         const r = rows[u.id]; const wd = parseInt(r.workDays) || 0
-        return { userId: u.id, userName: names[u.id] ?? u.full_name, workDays: wd, lodgingRent: parseNum(r.lodgingRent), lodgingMaintenance: parseNum(r.lodgingMaintenance), commute: parseNum(r.commutePerDay) * wd, businessTrip: 0 }
+        return { rowId: u.id, userId: u.id, userName: names[u.id] ?? u.full_name, workDays: wd, lodgingRent: parseNum(r.lodgingRent), lodgingMaintenance: parseNum(r.lodgingMaintenance), commute: parseNum(r.commutePerDay) * wd, businessTrip: 0 }
       }),
       ...extraRows.map((r) => {
         const wd = parseInt(r.workDays) || 0
-        return { userId: '', userName: r.name || '(추가)', workDays: wd, lodgingRent: parseNum(r.lodgingRent), lodgingMaintenance: parseNum(r.lodgingMaintenance), commute: parseNum(r.commutePerDay) * wd, businessTrip: 0 }
+        return { rowId: r.id, userId: '', userName: r.name || '(추가)', workDays: wd, lodgingRent: parseNum(r.lodgingRent), lodgingMaintenance: parseNum(r.lodgingMaintenance), commute: parseNum(r.commutePerDay) * wd, businessTrip: 0 }
       }),
     ]
+
+    const formData = new FormData()
+    formData.append('site_id', siteId)
+    formData.append('year_month', yearMonth)
+    formData.append('rows', JSON.stringify(payload))
+    for (const [rowId, files] of Object.entries(receipts)) {
+      for (const af of files) {
+        const subcategory = CATEGORY_TO_SUBCATEGORY[af.category]
+        formData.append(`receipt::${rowId}::${subcategory}`, af.file)
+      }
+    }
+
     startTransition(async () => {
-      const res = await createStaffCosts(siteId, yearMonth, payload)
+      const res = await createStaffCosts(formData)
       if (res && 'error' in res) { setError(res.error as string) }
       else { setSuccess(true); setTimeout(() => router.push('/expenses'), 1200) }
     })
