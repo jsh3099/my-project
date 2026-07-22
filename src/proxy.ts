@@ -49,7 +49,7 @@ export async function proxy(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    if (profile?.role !== 'system_admin') {
+    if (profile?.role !== 'system_admin' && profile?.role !== 'hq_officer') {
       return NextResponse.redirect(new URL('/dashboard', request.url))
     }
   }

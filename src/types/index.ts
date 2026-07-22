@@ -78,9 +78,26 @@ export type Expense = {
   is_over_limit: boolean
   over_limit_amount: number
   receipt_urls: string[]
+  settlement_round_id: string | null
   created_at: string
   updated_at: string
   deleted_at: string | null
   site?: Pick<Site, 'id' | 'name'>
   profile?: Pick<Profile, 'id' | 'full_name'>
+}
+
+export type SettlementRound = {
+  id: string
+  site_id: string
+  round_no: number
+  period_start: string
+  period_end: string
+  status: 'open' | 'confirmed'
+  prior_cumulative_amount: number
+  current_round_amount: number
+  confirmed_by: string | null
+  confirmed_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
 }

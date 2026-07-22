@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { deleteSite } from '@/actions/sites'
 import { SITE_STATUS_LABELS } from '@/lib/constants'
-import { Building2, Plus, Settings } from 'lucide-react'
+import { Building2, Plus, Settings, Receipt } from 'lucide-react'
 
 export default async function SitesPage() {
   const supabase = await createClient()
@@ -81,6 +81,12 @@ export default async function SitesPage() {
                         <Button variant="ghost" size="sm">
                           <Settings className="h-4 w-4" />
                           파라미터
+                        </Button>
+                      </Link>
+                      <Link href={`/admin/sites/${site.id}/settlement`}>
+                        <Button variant="ghost" size="sm">
+                          <Receipt className="h-4 w-4" />
+                          기성회차
                         </Button>
                       </Link>
                       <form action={deleteSite.bind(null, site.id)}>
