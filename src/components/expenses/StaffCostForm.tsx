@@ -12,9 +12,10 @@ interface Props {
   yearMonth: string
   users: Profile[]
   attendance: AttendanceRecord[]
+  mealDailyLimit?: number
+  applyCommuteRegulation?: boolean
 }
 
-const MEAL_DAILY = 25000
 const COMMUTE_DAILY = 25000
 const SPECIALTIES = ['책임', '건축', '토목', '기계', '전기', '통신', '안전'] as const
 const ACCEPT = '.jpg,.jpeg,.png,.pdf'
@@ -25,12 +26,12 @@ function parseNum(v: string) { return parseInt(v.replace(/,/g, ''), 10) || 0 }
 function fmt(n: number) { return n > 0 ? n.toLocaleString('ko-KR') : '-' }
 function fmtSize(b: number) { return b < 1024 * 1024 ? `${(b / 1024).toFixed(0)}KB` : `${(b / 1024 / 1024).toFixed(1)}MB` }
 
-function NumInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function NumInput({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
   return (
     <div className="relative">
-      <input type="text" inputMode="numeric" value={value}
+      <input type="text" inputMode="numeric" value={value} disabled={disabled}
         onChange={(e) => { const r = e.target.value.replace(/[^0-9]/g, ''); onChange(r ? parseInt(r).toLocaleString('ko-KR') : '') }}
-        className="w-full rounded border border-gray-300 px-2 py-1.5 pr-6 text-right text-sm focus:border-blue-500 focus:outline-none" />
+        className="w-full rounded border border-gray-300 px-2 py-1.5 pr-6 text-right text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400" />
       <span className="absolute right-1.5 top-1.5 text-xs text-gray-400">원</span>
     </div>
   )
@@ -56,8 +57,8 @@ type AttachedFile = { file: File; preview: string | null; category: ReceiptCateg
 type Row = { periodStart: string; periodEnd: string; workDays: string; lodgingRent: string; lodgingMaintenance: string; commutePerDay: string; specialty: string }
 type ExtraRow = Row & { id: string; name: string }
 
-function makeDefaultRow(yearMonth: string, specialty = '건축'): Row {
-  return { periodStart: `${yearMonth}-01`, periodEnd: '', workDays: '0', lodgingRent: '', lodgingMaintenance: '', commutePerDay: COMMUTE_DAILY.toLocaleString('ko-KR'), specialty }
+function makeDefaultRow(yearMonth: string, specialty = '건축', commuteDefault = COMMUTE_DAILY): Row {
+  return { periodStart: `${yearMonth}-01`, periodEnd: '', workDays: '0', lodgingRent: '', lodgingMaintenance: '', commutePerDay: commuteDefault > 0 ? commuteDefault.toLocaleString('ko-KR') : '', specialty }
 }
 
 let extraIdSeq = 0
@@ -163,17 +164,18 @@ function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (f
   )
 }
 
-export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }: Props) {
+export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, mealDailyLimit = 25000, applyCommuteRegulation = true }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
   const attendanceMap = Object.fromEntries(attendance.map((a) => [a.user_id, a.work_days]))
+  const commuteDefault = applyCommuteRegulation ? COMMUTE_DAILY : 0
 
   const [rows, setRows] = useState<Record<string, Row>>(
     Object.fromEntries(users.map((u, i) => [u.id, {
-      ...makeDefaultRow(yearMonth, SPECIALTIES[i % SPECIALTIES.length]),
+      ...makeDefaultRow(yearMonth, SPECIALTIES[i % SPECIALTIES.length], commuteDefault),
       workDays: String(attendanceMap[u.id] ?? 0),
     }]))
   )
@@ -230,7 +232,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
 
   function addRow() {
     const id = `extra_${++extraIdSeq}`
-    setExtraRows((p) => [...p, { id, name: '', ...makeDefaultRow(yearMonth) }])
+    setExtraRows((p) => [...p, { id, name: '', ...makeDefaultRow(yearMonth, '건축', commuteDefault) }])
   }
 
   function removeRow(id: string) {
@@ -266,7 +268,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
   ].reduce((acc, r) => {
     if (!r) return acc
     const wd = parseInt(r.workDays) || 0
-    acc.meal += wd * MEAL_DAILY
+    acc.meal += wd * mealDailyLimit
     acc.commute += parseNum(r.commutePerDay) * wd
     acc.lodgingRent += parseNum(r.lodgingRent)
     acc.lodgingMaintenance += parseNum(r.lodgingMaintenance)
@@ -308,7 +310,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
 
   function RowCells({ id, r, name, isExtra = false }: { id: string; r: Row; name: React.ReactNode; isExtra?: boolean }) {
     const wd = parseInt(r.workDays) || 0
-    const meal = wd * MEAL_DAILY
+    const meal = wd * mealDailyLimit
     const commuteTotal = parseNum(r.commutePerDay) * wd
     const subtotal = meal + commuteTotal + parseNum(r.lodgingRent) + parseNum(r.lodgingMaintenance)
     const updFn = isExtra
@@ -348,9 +350,12 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
               className="w-full rounded border border-blue-200 bg-blue-50 px-2 py-1.5 pr-6 text-right text-sm font-medium text-blue-700 cursor-default" />
             <span className="absolute right-1.5 top-1.5 text-xs text-blue-400">원</span>
           </div>
-          {wd > 0 && <p className="mt-0.5 text-center text-xs text-gray-400">{wd}일 × 25,000</p>}
+          {wd > 0 && <p className="mt-0.5 text-center text-xs text-gray-400">{wd}일 × {mealDailyLimit.toLocaleString()}</p>}
         </td>
-        <td className="px-3 py-2"><NumInput value={r.commutePerDay} onChange={(v) => updFn('commutePerDay', v)} /></td>
+        <td className="px-3 py-2">
+          <NumInput value={r.commutePerDay} onChange={(v) => updFn('commutePerDay', v)} disabled={!applyCommuteRegulation} />
+          {!applyCommuteRegulation && <p className="mt-0.5 text-center text-xs text-gray-400">여비규정 미적용 현장</p>}
+        </td>
         <td className="px-3 py-2 text-center font-medium text-blue-700">{commuteTotal > 0 ? commuteTotal.toLocaleString() : '-'}</td>
         <td className="px-3 py-2 text-right font-semibold text-gray-800">{subtotal > 0 ? subtotal.toLocaleString() : '-'}</td>
         <td className="px-2 py-2 text-center">

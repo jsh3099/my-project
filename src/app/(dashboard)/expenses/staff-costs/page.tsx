@@ -70,6 +70,13 @@ export default async function StaffCostsPage({
 
   const attendance = (attendanceData ?? []) as AttendanceRecord[]
 
+  // 현장별 정산 파라미터 (식대 한도·여비규정 적용 여부)
+  const { data: siteParams } = await admin
+    .from('site_parameters')
+    .select('meal_allowance_daily_limit, apply_commute_regulation')
+    .eq('site_id', siteId)
+    .maybeSingle()
+
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-6">
       <div className="flex items-center gap-2">
@@ -107,6 +114,8 @@ export default async function StaffCostsPage({
         yearMonth={yearMonth}
         users={staffUsers}
         attendance={attendance}
+        mealDailyLimit={siteParams?.meal_allowance_daily_limit ?? 25000}
+        applyCommuteRegulation={siteParams?.apply_commute_regulation ?? true}
       />
     </div>
   )

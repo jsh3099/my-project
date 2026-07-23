@@ -38,6 +38,7 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
   const [headcount, setHeadcount] = useState('1')
   const [targetUserId, setTargetUserId] = useState('')
   const [memo, setMemo] = useState('')
+  const [mobileConfirmed, setMobileConfirmed] = useState(false)
   const [files, setFiles] = useState<File[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -90,6 +91,7 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
     if (!category || !subcategory) { setError('비목과 세부항목을 선택해주세요.'); return }
     if (!amountNum) { setError('금액을 입력해주세요.'); return }
     if (selectedSub?.entryType === 'manual_person' && !targetUserId) { setError('대상자를 선택해주세요.'); return }
+    if (subcategory === 'communication' && !mobileConfirmed) { setError('개인 휴대폰 요금이 아님을 확인해주세요.'); return }
 
     setLoading(true)
     setError('')
@@ -235,6 +237,22 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
             </div>
           </div>
 
+          {subcategory === 'communication' && (
+            <div className="flex items-start gap-2 rounded-lg border border-yellow-300 bg-yellow-50 p-3">
+              <input
+                id="mobileConfirmed"
+                type="checkbox"
+                checked={mobileConfirmed}
+                onChange={(e) => setMobileConfirmed(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+              />
+              <label htmlFor="mobileConfirmed" className="text-sm text-yellow-800">
+                개인 휴대폰 요금이 아닌 회사·현장 공용 통신비임을 확인합니다.
+                <span className="mt-0.5 block text-xs text-yellow-600">개인 휴대폰 이용금액은 불인정 처리되어 저장이 제한됩니다.</span>
+              </label>
+            </div>
+          )}
+
           {selectedSub?.entryType === 'manual_person' && (
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">
@@ -337,7 +355,7 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
           </button>
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || (subcategory === 'communication' && !mobileConfirmed)}
             className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {loading ? '저장 중...' : isOverLimit ? '저장 (초과분 불인정)' : '저장'}

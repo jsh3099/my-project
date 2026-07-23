@@ -135,7 +135,12 @@ export async function createStaffCosts(formData: FormData) {
   const receiptsFor = (rowId: string, subcategory: string) => receiptUrlsByRowSub[`receipt::${rowId}::${subcategory}`] ?? []
 
   const today = new Date().toISOString().split('T')[0]
-  const mealLimit = 25000
+  const { data: siteParams } = await admin
+    .from('site_parameters')
+    .select('meal_allowance_daily_limit')
+    .eq('site_id', siteId)
+    .maybeSingle()
+  const mealLimit = siteParams?.meal_allowance_daily_limit ?? 25000
   const [yr, mo] = yearMonth.split('-').map(Number)
   const base = { site_id: siteId, submitted_by: user.id, user_id: user.id, year: yr, month: mo, year_month: yearMonth, status: 'draft', is_over_limit: false, over_limit_amount: 0, expense_date: today, headcount: 1 }
 

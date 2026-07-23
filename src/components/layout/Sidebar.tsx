@@ -22,6 +22,7 @@ const staffMenus = [
   { href: '/expenses/staff-costs', icon: UsersRound, label: '인원별 주재비' },
   { href: '/expenses/new', icon: PlusCircle, label: '직접경비 입력' },
   { href: '/attendance', icon: CalendarCheck, label: '출근부' },
+  { href: '/settlement', icon: ListOrdered, label: '기성회차' },
 ]
 
 const officerMenus = [

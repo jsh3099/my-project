@@ -73,6 +73,9 @@ export default async function SettlementRoundsPage({ params }: Props) {
     previewTree = buildCategorySummaryTree(entries)
   }
 
+  const previewRemaining = site.direct_expense_budget - priorCumulative - previewTotal
+  const isFinalRound = openRound ? openRound.period_end >= site.contract_end : false
+
   const lastRound = allRounds[allRounds.length - 1] ?? null
   const nextRoundNo = (lastRound?.round_no ?? 0) + 1
   const defaultPeriodStart = lastRound ? addDaysISO(lastRound.period_end, 1) : site.contract_start
@@ -121,6 +124,11 @@ export default async function SettlementRoundsPage({ params }: Props) {
               })}
             </tbody>
           </table>
+          {latestConfirmed && latestConfirmed.period_end >= site.contract_end && previewRemaining > 0 && (
+            <div className="border-t border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              ⚠ 계약기간이 종료된 이후에도 잔액이 {formatKRW(previewRemaining)} 남아있습니다 — 삭감 대상인지 확인이 필요합니다.
+            </div>
+          )}
         </div>
       )}
 
@@ -182,9 +190,17 @@ export default async function SettlementRoundsPage({ params }: Props) {
             </div>
             <div className="flex justify-between font-semibold text-blue-700">
               <span>잔액 (잠정)</span>
-              <span>{formatKRW(site.direct_expense_budget - priorCumulative - previewTotal)}</span>
+              <span>{formatKRW(previewRemaining)}</span>
             </div>
           </div>
+
+          {previewRemaining > 0 && (
+            <div className={`rounded-lg border p-3 text-sm ${isFinalRound ? 'border-red-300 bg-red-50 text-red-700' : 'border-yellow-300 bg-yellow-50 text-yellow-700'}`}>
+              ⚠ 잔액이 {formatKRW(previewRemaining)} 남아있습니다 — 계약기간 내 직접경비 예산을 다 사용하지 못하면
+              미사용분만큼 용역비가 삭감되고 실제 사용한 금액만 지급됩니다.
+              {isFinalRound && ' 이번 회차 기간이 계약 종료일을 포함하므로 특히 주의가 필요합니다.'}
+            </div>
+          )}
 
           <ConfirmRoundButton siteId={siteId} roundId={openRound.id} roundNo={openRound.round_no} />
         </div>
