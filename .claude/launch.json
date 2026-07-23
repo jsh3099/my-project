@@ -5,7 +5,8 @@
       "name": "jsh3099-my-project",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 3001
+      "port": 3001,
+      "autoPort": true
     }
   ]
 }

@@ -19,7 +19,8 @@ const adminMenus = [
 
 const staffMenus = [
   { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
-  { href: '/expenses/staff-costs', icon: UsersRound, label: '인원별 주재비' },
+  { href: '/expenses/staff-costs/resident', icon: UsersRound, label: '상주기술인 주재비' },
+  { href: '/expenses/staff-costs/support', icon: UsersRound, label: '기술지원 주재비' },
   { href: '/expenses/new', icon: PlusCircle, label: '직접경비 입력' },
   { href: '/attendance', icon: CalendarCheck, label: '출근부' },
   { href: '/settlement', icon: ListOrdered, label: '기성회차' },

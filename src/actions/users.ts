@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { userSchema } from '@/lib/validations/user'
+import type { StaffType } from '@/lib/constants'
 
 export async function createUser(formData: FormData) {
   const raw = {
@@ -36,17 +37,35 @@ export async function createUser(formData: FormData) {
   redirect('/admin/users')
 }
 
-export async function assignSite(userId: string, siteId: string) {
+export async function assignSite(userId: string, siteId: string, formData: FormData) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: '인증이 필요합니다.' }
 
+  const staffType = (formData.get('staff_type') as StaffType) || 'resident'
+
   const { error } = await supabase.from('user_site_assignments').upsert(
-    { user_id: userId, site_id: siteId, assigned_by: user.id, is_active: true },
+    { user_id: userId, site_id: siteId, assigned_by: user.id, is_active: true, staff_type: staffType },
     { onConflict: 'user_id,site_id' }
   )
 
   if (error) return { error: '현장 배정에 실패했습니다: ' + error.message }
+
+  revalidatePath(`/admin/users/${userId}`)
+  return { success: true }
+}
+
+export async function updateAssignmentType(userId: string, siteId: string, formData: FormData) {
+  const supabase = await createClient()
+  const staffType = formData.get('staff_type') as StaffType
+
+  const { error } = await supabase
+    .from('user_site_assignments')
+    .update({ staff_type: staffType })
+    .eq('user_id', userId)
+    .eq('site_id', siteId)
+
+  if (error) return { error: '구분 변경에 실패했습니다: ' + error.message }
 
   revalidatePath(`/admin/users/${userId}`)
   return { success: true }

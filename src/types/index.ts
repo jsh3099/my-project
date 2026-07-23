@@ -1,4 +1,4 @@
-import type { Role } from '@/lib/constants'
+import type { Role, StaffType } from '@/lib/constants'
 
 export type Profile = {
   id: string
@@ -6,6 +6,8 @@ export type Profile = {
   full_name: string
   role: Role
   is_active: boolean
+  home_address: string | null
+  vehicle_fuel_type: string | null
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -14,6 +16,7 @@ export type Profile = {
 export type Site = {
   id: string
   name: string
+  address: string | null
   client_name: string
   contract_start: string
   contract_end: string
@@ -46,6 +49,7 @@ export type UserSiteAssignment = {
   assigned_at: string
   assigned_by: string | null
   is_active: boolean
+  staff_type: StaffType
 }
 
 export type AttendanceRecord = {

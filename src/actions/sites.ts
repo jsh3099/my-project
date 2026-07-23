@@ -13,6 +13,7 @@ export async function createSite(formData: FormData) {
   const raw = {
     name: formData.get('name'),
     client_name: formData.get('client_name'),
+    address: formData.get('address') || undefined,
     contract_start: formData.get('contract_start'),
     contract_end: formData.get('contract_end'),
     contract_amount: formData.get('contract_amount'),
@@ -42,6 +43,7 @@ export async function updateSite(siteId: string, formData: FormData) {
   const raw = {
     name: formData.get('name'),
     client_name: formData.get('client_name'),
+    address: formData.get('address') || undefined,
     contract_start: formData.get('contract_start'),
     contract_end: formData.get('contract_end'),
     contract_amount: formData.get('contract_amount'),

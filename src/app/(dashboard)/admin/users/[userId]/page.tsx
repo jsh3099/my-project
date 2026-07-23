@@ -4,8 +4,14 @@ import { ChevronLeft, UserCheck, UserX } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
-import { ROLE_LABELS, SITE_STATUS_LABELS } from '@/lib/constants'
-import { assignSite, unassignSite } from '@/actions/users'
+import { Select } from '@/components/ui/Select'
+import { ROLE_LABELS, SITE_STATUS_LABELS, STAFF_TYPE_LABELS, STAFF_TYPES } from '@/lib/constants'
+import { assignSite, unassignSite, updateAssignmentType } from '@/actions/users'
+
+const STAFF_TYPE_OPTIONS = Object.values(STAFF_TYPES).map((value) => ({
+  value,
+  label: STAFF_TYPE_LABELS[value],
+}))
 
 interface Props {
   params: Promise<{ userId: string }>
@@ -18,14 +24,14 @@ export default async function UserDetailPage({ params }: Props) {
   const [{ data: user }, { data: allSites }, { data: assignments }] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', userId).is('deleted_at', null).single(),
     supabase.from('sites').select('id, name, client_name, status').is('deleted_at', null).order('name'),
-    supabase.from('user_site_assignments').select('site_id, is_active').eq('user_id', userId),
+    supabase.from('user_site_assignments').select('site_id, is_active, staff_type').eq('user_id', userId),
   ])
 
   if (!user) notFound()
 
-  const assignedSiteIds = new Set(
-    (assignments ?? []).filter((a) => a.is_active).map((a) => a.site_id)
-  )
+  const activeAssignments = (assignments ?? []).filter((a) => a.is_active)
+  const assignedSiteIds = new Set(activeAssignments.map((a) => a.site_id))
+  const staffTypeBySite = new Map(activeAssignments.map((a) => [a.site_id, a.staff_type]))
   const assignedSites = (allSites ?? []).filter((s) => assignedSiteIds.has(s.id))
   const unassignedSites = (allSites ?? []).filter((s) => !assignedSiteIds.has(s.id))
 
@@ -63,6 +69,20 @@ export default async function UserDetailPage({ params }: Props) {
                   <Badge variant={site.status === 'active' ? 'green' : 'gray'}>
                     {SITE_STATUS_LABELS[site.status as keyof typeof SITE_STATUS_LABELS]}
                   </Badge>
+                  <form
+                    action={updateAssignmentType.bind(null, userId, site.id) as never}
+                    className="flex items-center gap-1"
+                  >
+                    <Select
+                      name="staff_type"
+                      defaultValue={staffTypeBySite.get(site.id)}
+                      options={STAFF_TYPE_OPTIONS}
+                      className="py-1 text-xs"
+                    />
+                    <Button variant="ghost" size="sm">
+                      변경
+                    </Button>
+                  </form>
                   <form action={unassignSite.bind(null, userId, site.id) as never}>
                     <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-50">
                       <UserX className="h-4 w-4" />
@@ -86,7 +106,16 @@ export default async function UserDetailPage({ params }: Props) {
                   <p className="text-sm font-medium text-gray-800">{site.name}</p>
                   <p className="text-xs text-gray-500">{site.client_name}</p>
                 </div>
-                <form action={assignSite.bind(null, userId, site.id) as never}>
+                <form
+                  action={assignSite.bind(null, userId, site.id) as never}
+                  className="flex items-center gap-2"
+                >
+                  <Select
+                    name="staff_type"
+                    defaultValue={STAFF_TYPES.RESIDENT}
+                    options={STAFF_TYPE_OPTIONS}
+                    className="py-1 text-xs"
+                  />
                   <Button variant="secondary" size="sm">
                     <UserCheck className="h-4 w-4" />
                     배정

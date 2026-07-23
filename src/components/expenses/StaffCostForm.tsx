@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createStaffCosts, type StaffCostRow } from '@/actions/expenses'
 import type { Profile, AttendanceRecord } from '@/types'
 import { calcWorkDays } from '@/lib/korean-holidays'
+import { CommuteCalcPanel } from './CommuteCalcPanel'
 
 interface Props {
   siteId: string
@@ -14,6 +15,10 @@ interface Props {
   attendance: AttendanceRecord[]
   mealDailyLimit?: number
   applyCommuteRegulation?: boolean
+  siteAddress?: string | null
+  myUserId?: string
+  myHomeAddress?: string | null
+  myFuelType?: string | null
 }
 
 const COMMUTE_DAILY = 25000
@@ -164,7 +169,7 @@ function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (f
   )
 }
 
-export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, mealDailyLimit = 25000, applyCommuteRegulation = true }: Props) {
+export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, mealDailyLimit = 25000, applyCommuteRegulation = true, siteAddress, myUserId, myHomeAddress, myFuelType }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -199,6 +204,12 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
 
   function toggleReceipt(id: string) {
     setOpenReceipt((p) => ({ ...p, [id]: !p[id] }))
+  }
+
+  // 자차 교통비 산출 패널 열림 상태
+  const [openCommute, setOpenCommute] = useState<Record<string, boolean>>({})
+  function toggleCommute(id: string) {
+    setOpenCommute((p) => ({ ...p, [id]: !p[id] }))
   }
 
   function setRowReceipts(id: string, files: AttachedFile[]) {
@@ -355,6 +366,12 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
         <td className="px-3 py-2">
           <NumInput value={r.commutePerDay} onChange={(v) => updFn('commutePerDay', v)} disabled={!applyCommuteRegulation} />
           {!applyCommuteRegulation && <p className="mt-0.5 text-center text-xs text-gray-400">여비규정 미적용 현장</p>}
+          {applyCommuteRegulation && (
+            <button type="button" onClick={() => toggleCommute(id)}
+              className="mt-0.5 w-full text-center text-xs text-green-600 hover:underline">
+              🚗 자차 산출
+            </button>
+          )}
         </td>
         <td className="px-3 py-2 text-center font-medium text-blue-700">{commuteTotal > 0 ? commuteTotal.toLocaleString() : '-'}</td>
         <td className="px-3 py-2 text-right font-semibold text-gray-800">{subtotal > 0 ? subtotal.toLocaleString() : '-'}</td>
@@ -413,6 +430,19 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
             </td>
           </tr>
         )}
+        {openCommute[id] && (
+          <tr>
+            <td colSpan={11} className="p-0">
+              <CommuteCalcPanel
+                siteAddress={siteAddress ?? ''}
+                isOwnRow={id === myUserId}
+                defaultHomeAddress={id === myUserId ? myHomeAddress : undefined}
+                defaultFuelType={id === myUserId ? myFuelType : undefined}
+                onApply={(amount) => upd(id, 'commutePerDay', amount.toLocaleString('ko-KR'))}
+              />
+            </td>
+          </tr>
+        )}
       </>
     )
   }
@@ -435,6 +465,17 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
             </button>
           </td>
         </tr>
+        {openCommute[r.id] && (
+          <tr>
+            <td colSpan={11} className="p-0">
+              <CommuteCalcPanel
+                siteAddress={siteAddress ?? ''}
+                isOwnRow={false}
+                onApply={(amount) => updExtra(r.id, 'commutePerDay', amount.toLocaleString('ko-KR'))}
+              />
+            </td>
+          </tr>
+        )}
         {openReceipt[r.id] && (
           <tr>
             <td colSpan={11} className="p-0">

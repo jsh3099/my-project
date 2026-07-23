@@ -54,6 +54,12 @@ export function SiteForm({ site, action }: SiteFormProps) {
         defaultValue={site?.client_name}
         placeholder="예: 서울특별시"
       />
+      <Input
+        label="현장 주소"
+        name="address"
+        defaultValue={site?.address ?? ''}
+        placeholder="예: 충북 청주시 상당구 문화동 89 (자차 교통비 자동산출에 사용)"
+      />
 
       <div className="grid grid-cols-2 gap-4">
         <Input

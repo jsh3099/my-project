@@ -4,6 +4,7 @@ export const siteSchema = z
   .object({
     name: z.string().min(1, '현장명을 입력하세요'),
     client_name: z.string().min(1, '발주처명을 입력하세요'),
+    address: z.string().optional(),
     contract_start: z.string().min(1, '계약 시작일을 입력하세요'),
     contract_end: z.string().min(1, '계약 종료일을 입력하세요'),
     contract_amount: z.coerce

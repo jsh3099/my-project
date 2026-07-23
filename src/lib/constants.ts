@@ -184,6 +184,42 @@ export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; lab
   ],
 }
 
+// ── 차량 유종 / 연비 (한국에너지공단 2021년 통계 기준, 공무원보수 등의 업무지침) ──
+// 연료비 지급기준: 여행거리(km) × 유가 ÷ 연비
+export const VEHICLE_FUEL_TYPES = {
+  GASOLINE: 'gasoline',
+  DIESEL: 'diesel',
+  LPG: 'lpg',
+  HYBRID: 'hybrid',
+  PHEV: 'phev',
+  EV: 'ev',
+  HYDROGEN: 'hydrogen',
+} as const
+
+export type VehicleFuelType = (typeof VEHICLE_FUEL_TYPES)[keyof typeof VEHICLE_FUEL_TYPES]
+
+export const VEHICLE_FUEL_TYPE_LABELS: Record<VehicleFuelType, string> = {
+  gasoline: '휘발유',
+  diesel: '경유',
+  lpg: 'LPG',
+  hybrid: '하이브리드',
+  phev: '플러그인 하이브리드',
+  ev: '전기',
+  hydrogen: '수소',
+}
+
+// value: 연비, unit: 연비 단위(km당 소모 단위), priceUnit: 유가 입력 단위(원 단위 표시용)
+// 플러그인하이브리드는 휘발유 모드(km/L) 값을 기본으로 사용한다 (전기 모드 2.84km/kWh는 별도 정책 결정 필요).
+export const FUEL_EFFICIENCY: Record<VehicleFuelType, { value: number; unit: string; priceUnit: string }> = {
+  gasoline: { value: 11.97, unit: 'km/L', priceUnit: '원/L' },
+  diesel: { value: 12.52, unit: 'km/L', priceUnit: '원/L' },
+  lpg: { value: 8.83, unit: 'km/L', priceUnit: '원/L' },
+  hybrid: { value: 15.37, unit: 'km/L', priceUnit: '원/L' },
+  phev: { value: 10.61, unit: 'km/L', priceUnit: '원/L' },
+  ev: { value: 5.22, unit: 'km/kWh', priceUnit: '원/kWh' },
+  hydrogen: { value: 94.9, unit: 'km/kg', priceUnit: '원/kg' },
+}
+
 // ── 정산 상태 ─────────────────────────────────────────────
 export const EXPENSE_STATUS = {
   DRAFT: 'draft',
@@ -221,6 +257,19 @@ export const ROLE_LABELS: Record<Role, string> = {
   site_staff: '현장 직원',
   hq_officer: '본사 정산 담당자',
   system_admin: '시스템 관리자',
+}
+
+// ── 현장 배정 인원 구분 (상주기술인 / 기술지원 기술인) ──────────
+export const STAFF_TYPES = {
+  RESIDENT: 'resident',
+  SUPPORT: 'support',
+} as const
+
+export type StaffType = (typeof STAFF_TYPES)[keyof typeof STAFF_TYPES]
+
+export const STAFF_TYPE_LABELS: Record<StaffType, string> = {
+  resident: '상주기술인',
+  support: '기술지원 기술인',
 }
 
 export const SITE_STATUS = {
