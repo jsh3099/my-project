@@ -182,6 +182,13 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
   const [names, setNames] = useState<Record<string, string>>(
     Object.fromEntries(users.map((u) => [u.id, u.full_name]))
   )
+  // 현장 인원 변동이 잦아, 배정된 인원도 이번 달 입력에서 제외할 수 있어야 함
+  const [removedUserIds, setRemovedUserIds] = useState<Set<string>>(new Set())
+  const activeUsers = users.filter((u) => !removedUserIds.has(u.id))
+
+  function removeUserRow(uid: string) {
+    setRemovedUserIds((p) => new Set(p).add(uid))
+  }
 
   // 영수증: 행 id → 파일 목록
   const [receipts, setReceipts] = useState<Record<string, AttachedFile[]>>({})
@@ -236,7 +243,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
 
   // 직종 중복 시 자동 번호 부여
   const allSpecialties: { id: string; sp: string }[] = [
-    ...users.map((u) => ({ id: u.id, sp: rows[u.id]?.specialty ?? '' })),
+    ...activeUsers.map((u) => ({ id: u.id, sp: rows[u.id]?.specialty ?? '' })),
     ...extraRows.map((r) => ({ id: r.id, sp: r.specialty })),
   ]
   const spCount: Record<string, number> = {}
@@ -254,7 +261,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
 
   // 합계
   const totals = [
-    ...users.map((u) => rows[u.id]),
+    ...activeUsers.map((u) => rows[u.id]),
     ...extraRows,
   ].reduce((acc, r) => {
     if (!r) return acc
@@ -266,12 +273,12 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
     return acc
   }, { meal: 0, commute: 0, lodgingRent: 0, lodgingMaintenance: 0 })
   const grandTotal = totals.meal + totals.commute + totals.lodgingRent + totals.lodgingMaintenance
-  const totalWorkDays = [...users.map((u) => rows[u.id]), ...extraRows].reduce((s, r) => s + (parseInt(r?.workDays ?? '0') || 0), 0)
+  const totalWorkDays = [...activeUsers.map((u) => rows[u.id]), ...extraRows].reduce((s, r) => s + (parseInt(r?.workDays ?? '0') || 0), 0)
 
   function handleSave() {
     setError(null)
     const payload: StaffCostRow[] = [
-      ...users.map((u) => {
+      ...activeUsers.map((u) => {
         const r = rows[u.id]; const wd = parseInt(r.workDays) || 0
         return { rowId: u.id, userId: u.id, userName: names[u.id] ?? u.full_name, workDays: wd, lodgingRent: parseNum(r.lodgingRent), lodgingMaintenance: parseNum(r.lodgingMaintenance), commute: parseNum(r.commutePerDay) * wd, businessTrip: 0 }
       }),
@@ -384,10 +391,16 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
               className="w-28 rounded border border-gray-300 bg-white px-2 py-1.5 text-sm font-medium text-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-none hover:border-gray-400"
             />
           } />
+          <td className="px-1 py-2">
+            <button type="button" onClick={() => removeUserRow(id)} title="이번 달 입력에서 제외"
+              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500">
+              ✕
+            </button>
+          </td>
         </tr>
         {openReceipt[id] && (
           <tr>
-            <td colSpan={10} className="p-0">
+            <td colSpan={11} className="p-0">
               <ReceiptPanel
                 files={receipts[id] ?? []}
                 onChange={(files) => setRowReceipts(id, files)}
@@ -460,10 +473,11 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
               <th className="px-3 py-3 text-center whitespace-nowrap">교통비 합계</th>
               <th className="px-3 py-3 text-right whitespace-nowrap">소계</th>
               <th className="px-2 py-3 text-center whitespace-nowrap">영수증</th>
+              <th className="px-2 py-3 text-center whitespace-nowrap">삭제</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {users.map((u) => <UserRow key={u.id} u={u} />)}
+            {activeUsers.map((u) => <UserRow key={u.id} u={u} />)}
             {extraRows.map((r) => <ExtraRowItem key={r.id} r={r} />)}
           </tbody>
           <tfoot className="bg-gray-50 text-xs font-semibold text-gray-700">
@@ -477,6 +491,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance }
               <td className="px-3 py-3 text-center text-gray-400">—</td>
               <td className="px-3 py-3 text-center text-blue-700">{fmt(totals.commute)}</td>
               <td className="px-3 py-3 text-right text-blue-700">{grandTotal.toLocaleString()}</td>
+              <td />
               <td />
             </tr>
           </tfoot>
