@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createSettlementRound } from '@/actions/settlementRounds'
 import { SettlementRoundForm } from '@/components/sites/SettlementRoundForm'
 import { ConfirmRoundButton } from '@/components/sites/ConfirmRoundButton'
+import { ReportDownloadButton } from '@/components/settlement/ReportDownloadButton'
 import { buildCategorySummaryTree } from '@/lib/expenseSummaryTree'
 import type { SettlementRound } from '@/types'
 
@@ -105,6 +106,7 @@ export default async function SettlementRoundsPage({ params }: Props) {
                 <th className="px-4 py-2 text-right font-medium text-gray-500">전회기성</th>
                 <th className="px-4 py-2 text-right font-medium text-gray-500">금회기성</th>
                 <th className="px-4 py-2 text-right font-medium text-gray-500">잔액</th>
+                <th className="px-4 py-2 text-center font-medium text-gray-500">정산서</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -118,6 +120,9 @@ export default async function SettlementRoundsPage({ params }: Props) {
                     <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatKRW(r.current_round_amount)}</td>
                     <td className={`px-4 py-3 text-right font-medium ${remaining < 0 ? 'text-red-600' : 'text-blue-600'}`}>
                       {formatKRW(remaining)}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <ReportDownloadButton siteId={siteId} roundId={r.id} label="엑셀" />
                     </td>
                   </tr>
                 )
@@ -139,6 +144,7 @@ export default async function SettlementRoundsPage({ params }: Props) {
             <h3 className="text-sm font-semibold text-gray-800">
               {openRound.round_no}회차 진행 중 — {openRound.period_start} ~ {openRound.period_end}
             </h3>
+            <ReportDownloadButton siteId={siteId} roundId={openRound.id} label="📄 잠정 정산서 엑셀" />
           </div>
 
           <div className="space-y-2 text-sm">

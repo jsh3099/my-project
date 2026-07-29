@@ -1,4 +1,4 @@
-import type { Role, StaffType } from '@/lib/constants'
+import type { Role, StaffType, CommuteMode, VehicleFuelType } from '@/lib/constants'
 
 export type Profile = {
   id: string
@@ -37,6 +37,9 @@ export type SiteParameters = {
   travel_grade: number
   apply_commute_regulation: boolean
   reject_personal_mobile: boolean
+  trip_daily_allowance: number
+  trip_meal_allowance: number
+  commute_trips_per_month: number
   notes: string | null
   created_at: string
   updated_at: string
@@ -64,6 +67,15 @@ export type AttendanceRecord = {
   updated_at: string
 }
 
+// 숙소비 산출 상세 (expenses.calc_detail — lodging_rent 행에 저장)
+export type LodgingCalcDetail = {
+  contractType: 'monthly' | 'jeonse'
+  monthlyRent: number          // 월세 (전세면 환산 결과)
+  deposit?: number             // 전세보증금
+  conversionRatePct?: number   // 전월세 전환율 (연 %)
+  convertedMonthly?: number    // 환산 월세 = deposit × rate% ÷ 12
+}
+
 export type Expense = {
   id: string
   site_id: string
@@ -71,9 +83,16 @@ export type Expense = {
   year_month: string
   category: string
   subcategory: string
-  amount: number
+  amount: number                       // 적용금액(인정금액) — 회차 집계 기준
+  amount_gross: number | null          // VAT 포함 사용금액 (NULL = 구모델, amount와 동일 취급)
+  vat_mode: 'none' | 'exclude_10'
   expense_date: string
+  period_start: string | null          // 인원별 투입기간
+  period_end: string | null
+  specialty: string | null             // 직종 스냅샷 (책임/건축1/…)
+  calc_detail: LodgingCalcDetail | Record<string, unknown> | null
   headcount: number
+  working_days: number | null
   target_user_id: string | null
   target_user_name: string | null
   memo: string | null
@@ -88,6 +107,81 @@ export type Expense = {
   deleted_at: string | null
   site?: Pick<Site, 'id' | 'name'>
   profile?: Pick<Profile, 'id' | 'full_name'>
+}
+
+// 건별 사용내역 (관리비 / 현장운영경비 / 도서인쇄 / 복리후생 공용)
+export type ExpenseItem = {
+  id: string
+  expense_id: string
+  item_date: string
+  vendor: string | null
+  description: string
+  tag: string | null
+  amount_gross: number
+  amount_applied: number
+  sort_order: number
+  created_at: string
+}
+
+// 상주기술인 교통비 월별 산출 (expense 1:1)
+export type CommuteCalc = {
+  id: string
+  expense_id: string
+  mode: CommuteMode
+  home_address: string | null
+  distance_oneway_km: number
+  fuel_type: VehicleFuelType
+  fuel_efficiency: number
+  fuel_price: number
+  fuel_price_date: string | null
+  fuel_cost_roundtrip: number
+  toll_roundtrip: number
+  multiplier: number
+  map_capture_url: string | null
+  total: number
+  created_at: string
+}
+
+// 기술지원 기술인 출장 방문일별 기록 (expense 1:N)
+export type TripVisit = {
+  id: string
+  expense_id: string
+  visit_date: string
+  origin_address: string | null
+  distance_oneway_km: number
+  fuel_type: VehicleFuelType
+  fuel_efficiency: number
+  fuel_price: number
+  fuel_price_date: string | null
+  fuel_cost: number
+  toll: number
+  daily_allowance: number
+  meal_allowance: number
+  total: number
+  map_capture_url: string | null
+  created_at: string
+}
+
+// 복리후생비 월별 정산기준 (expense 1:1)
+export type WelfareSettlement = {
+  id: string
+  expense_id: string
+  resident_headcount: number
+  monthly_limit: number
+  computed_amount: number
+  evidence_amount: number
+  approved_amount: number
+  created_at: string
+}
+
+// 정산서 총괄표 회사 정보 (단일행)
+export type CompanyProfile = {
+  id: boolean
+  company_name: string
+  representative: string
+  address: string
+  stamp_image_url: string | null
+  updated_at: string
 }
 
 export type SettlementRound = {

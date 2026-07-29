@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { ReportDownloadButton } from '@/components/settlement/ReportDownloadButton'
 import type { Site, SettlementRound } from '@/types'
 
 function formatKRW(n: number) {
@@ -97,6 +98,7 @@ export default async function StaffSettlementPage({
                 <th className="px-4 py-2 text-right font-medium text-gray-500">전회기성</th>
                 <th className="px-4 py-2 text-right font-medium text-gray-500">금회기성</th>
                 <th className="px-4 py-2 text-right font-medium text-gray-500">잔액</th>
+                <th className="px-4 py-2 text-center font-medium text-gray-500">정산서</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -110,6 +112,9 @@ export default async function StaffSettlementPage({
                     <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatKRW(r.current_round_amount)}</td>
                     <td className={`px-4 py-3 text-right font-medium ${remaining < 0 ? 'text-red-600' : 'text-blue-600'}`}>
                       {formatKRW(remaining)}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <ReportDownloadButton siteId={siteId} roundId={r.id} label="엑셀" />
                     </td>
                   </tr>
                 )
@@ -144,10 +149,12 @@ export default async function StaffSettlementPage({
               사용한 비용은 빠짐없이 입력·제출해주세요.
             </div>
           )}
+          <ReportDownloadButton siteId={siteId} roundId={openRound.id} label="📄 잠정 정산서 엑셀" />
         </div>
       ) : (
-        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 text-center text-sm text-gray-400">
-          진행 중인 회차가 없습니다. 본사 정산 담당자에게 문의하세요.
+        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 space-y-3 text-center text-sm text-gray-400">
+          <p>진행 중인 회차가 없습니다. 본사 정산 담당자에게 문의하세요.</p>
+          <ReportDownloadButton siteId={siteId} label="📄 잠정 정산서 엑셀 (미편입 지출)" />
         </div>
       )}
     </div>

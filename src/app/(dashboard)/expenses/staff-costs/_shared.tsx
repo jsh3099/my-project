@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { StaffCostForm } from '@/components/expenses/StaffCostForm'
+import { SupportTripForm } from '@/components/expenses/SupportTripForm'
 import type { StaffType } from '@/lib/constants'
 import { STAFF_TYPE_LABELS } from '@/lib/constants'
 import type { Site, Profile, AttendanceRecord } from '@/types'
@@ -80,15 +81,20 @@ export async function StaffCostsPageContent({
   // 현장별 정산 파라미터 (식대 한도·여비규정 적용 여부)
   const { data: siteParams } = await admin
     .from('site_parameters')
-    .select('meal_allowance_daily_limit, apply_commute_regulation')
+    .select('meal_allowance_daily_limit, apply_commute_regulation, commute_trips_per_month, trip_daily_allowance, trip_meal_allowance')
     .eq('site_id', siteId)
     .maybeSingle()
+
+  // 기술지원 기술인은 주재비가 아닌 출장비(방문일별 산출)로 정산한다 — 정산서 2-1
+  const isSupport = staffType === 'support'
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-6">
       <div className="flex items-center gap-2">
-        <h1 className="text-xl font-bold text-gray-900">{STAFF_TYPE_LABELS[staffType]} 주재비 입력</h1>
-        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500">정산서 3.1</span>
+        <h1 className="text-xl font-bold text-gray-900">
+          {STAFF_TYPE_LABELS[staffType]} {isSupport ? '출장비' : '주재비'} 입력
+        </h1>
+        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{isSupport ? '정산서 2-1' : '정산서 3.1'}</span>
       </div>
 
       {/* 현장 선택 (여러 현장 배정 시) */}
@@ -115,19 +121,32 @@ export async function StaffCostsPageContent({
         </form>
       )}
 
-      <StaffCostForm
-        siteId={siteId}
-        siteName={siteName}
-        yearMonth={yearMonth}
-        users={staffUsers}
-        attendance={attendance}
-        mealDailyLimit={siteParams?.meal_allowance_daily_limit ?? 25000}
-        applyCommuteRegulation={staffType === 'resident' && (siteParams?.apply_commute_regulation ?? true)}
-        siteAddress={site?.address}
-        myUserId={user.id}
-        myHomeAddress={me?.home_address}
-        myFuelType={me?.vehicle_fuel_type}
-      />
+      {isSupport ? (
+        <SupportTripForm
+          siteId={siteId}
+          siteName={siteName}
+          yearMonth={yearMonth}
+          users={staffUsers}
+          siteAddress={site?.address}
+          tripDailyAllowance={siteParams?.trip_daily_allowance ?? 25000}
+          tripMealAllowance={siteParams?.trip_meal_allowance ?? 25000}
+        />
+      ) : (
+        <StaffCostForm
+          siteId={siteId}
+          siteName={siteName}
+          yearMonth={yearMonth}
+          users={staffUsers}
+          attendance={attendance}
+          mealDailyLimit={siteParams?.meal_allowance_daily_limit ?? 25000}
+          applyCommuteRegulation={siteParams?.apply_commute_regulation ?? true}
+          commuteTripsDefault={siteParams?.commute_trips_per_month ?? 4}
+          siteAddress={site?.address}
+          myUserId={user.id}
+          myHomeAddress={me?.home_address}
+          myFuelType={me?.vehicle_fuel_type}
+        />
+      )}
     </div>
   )
 }

@@ -10,6 +10,10 @@ import {
 } from '@/lib/constants'
 import type { Site, SiteParameters, Profile } from '@/types'
 import { createExpense } from '@/actions/expenses'
+import { applyVatExclusion, calcItemized, calcWelfare } from '@/lib/settlement'
+
+// 건별 사용내역 (정산서 1-4~ / 3-1 서식: 구매일시·구매처·구매내용·금액)
+export type ExpenseItemInput = { date: string; vendor: string; description: string; tag: string; amountGross: string }
 
 interface Props {
   sites: Site[]
@@ -42,33 +46,49 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
   const [files, setFiles] = useState<File[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // 건별 사용내역 + VAT 제외 (현장운영경비·도서인쇄 등 실비 항목)
+  const [items, setItems] = useState<ExpenseItemInput[]>([])
+  const [vatExclude, setVatExclude] = useState(true)
 
   const params = paramsMap[siteId]
   const welfareLimit = params?.welfare_monthly_limit ?? 50000
   const staffOptions = staffBySite[siteId] ?? []
 
-  // 인원별 주재비 화면(자동계산·개인별 실비 recurring)에서 다루는 항목은 여기서 제외해 중복 입력을 막는다.
+  // 인원별 주재비 화면(자동계산·개인별 실비 recurring)과 기술지원 출장비 화면에서 다루는 항목은 여기서 제외해 중복 입력을 막는다.
   const subcategories = category
-    ? EXPENSE_SUBCATEGORIES[category].filter((s) => s.entryType !== 'auto_recurring' && s.entryType !== 'manual_recurring')
+    ? EXPENSE_SUBCATEGORIES[category].filter((s) => s.entryType !== 'auto_recurring' && s.entryType !== 'manual_recurring' && s.entryType !== 'auto_trip')
     : []
   const selectedSub = subcategories.find((s) => s.value === subcategory)
+  const isWelfare = selectedSub?.limitType === 'welfare'
+  // 건별 내역 입력을 지원하는 항목 (현장 단위 실비)
+  const supportsItems = selectedSub?.entryType === 'manual_site'
 
-  // 한도 계산
-  const amountNum = parseInt(amount.replace(/,/g, ''), 10) || 0
   const headcountNum = parseInt(headcount, 10) || 1
+  const validItems = items.filter((i) => (parseInt(i.amountGross.replace(/,/g, ''), 10) || 0) > 0)
+    .map((i) => ({ ...i, amountGrossNum: parseInt(i.amountGross.replace(/,/g, ''), 10) || 0 }))
+  const hasItems = validItems.length > 0
 
-  let limitWarning = ''
-  let isOverLimit = false
-  let overLimitAmount = 0
+  // 금액 산정 (미리보기 — 서버가 동일 규칙으로 재계산)
+  // - 복리후생: 건별 VAT제외 합(증빙) vs 인원×한도(산출) → min이 인정금액
+  // - 그 외 건별: 합계에서 VAT제외
+  // - 건별 없이 단일 금액: 입력액에 VAT 토글 적용
+  const manualAmountNum = parseInt(amount.replace(/,/g, ''), 10) || 0
+  const grossTotal = hasItems ? validItems.reduce((s, i) => s + i.amountGrossNum, 0) : manualAmountNum
+  const itemized = calcItemized(
+    hasItems ? validItems.map((i) => ({ amountGross: i.amountGrossNum })) : [{ amountGross: manualAmountNum }],
+    vatExclude ? 'exclude_10' : 'none',
+    { applyPerItem: isWelfare },
+  )
+  const welfare = isWelfare
+    ? calcWelfare({ residentHeadcount: headcountNum, monthlyLimit: welfareLimit, evidenceAmount: itemized.appliedTotal })
+    : null
 
-  if (selectedSub?.limitType === 'welfare') {
-    const maxAllowed = welfareLimit * headcountNum
-    if (amountNum > maxAllowed) {
-      isOverLimit = true
-      overLimitAmount = amountNum - maxAllowed
-      limitWarning = `복리후생비 한도 초과! 1인 1월 ${welfareLimit.toLocaleString()}원 × ${headcountNum}명 = ${maxAllowed.toLocaleString()}원 / 초과분 ${overLimitAmount.toLocaleString()}원은 불인정 처리됩니다.`
-    }
-  }
+  const amountNum = welfare ? welfare.approvedAmount : itemized.appliedTotal
+  const isOverLimit = (welfare?.overLimitAmount ?? 0) > 0
+  const overLimitAmount = welfare?.overLimitAmount ?? 0
+  const limitWarning = isOverLimit && welfare
+    ? `복리후생비 한도 초과: 산출 ${welfare.computedAmount.toLocaleString()}원(${headcountNum}명 × ${welfareLimit.toLocaleString()}) < 증빙 ${welfare.evidenceAmount.toLocaleString()}원 → 인정 ${welfare.approvedAmount.toLocaleString()}원, 초과분 ${overLimitAmount.toLocaleString()}원 불인정`
+    : ''
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files ?? [])
@@ -110,6 +130,18 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
     formData.append('memo', memo)
     formData.append('is_over_limit', String(isOverLimit))
     formData.append('over_limit_amount', String(overLimitAmount))
+    // 건별 내역·VAT·복리후생 정산 파라미터 — 서버가 동일 규칙으로 재계산해 확정
+    formData.append('vat_mode', vatExclude ? 'exclude_10' : 'none')
+    if (hasItems) {
+      formData.append('items', JSON.stringify(validItems.map((i) => ({
+        date: i.date || expenseDate, vendor: i.vendor, description: i.description || selectedSub?.label || '', tag: i.tag, amountGross: i.amountGrossNum,
+      }))))
+    } else if (manualAmountNum > 0) {
+      formData.append('items', JSON.stringify([{ date: expenseDate, vendor: '', description: selectedSub?.label ?? '', tag: '', amountGross: manualAmountNum }]))
+    }
+    if (isWelfare) {
+      formData.append('welfare', JSON.stringify({ residentHeadcount: headcountNum, monthlyLimit: welfareLimit }))
+    }
     files.forEach((f) => formData.append('receipts', f))
 
     const result = await createExpense(formData)
@@ -120,6 +152,10 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
     } else {
       router.push('/expenses')
     }
+  }
+
+  function updItem(idx: number, patch: Partial<ExpenseItemInput>) {
+    setItems((p) => p.map((it, i) => i === idx ? { ...it, ...patch } : it))
   }
 
   return (
@@ -219,22 +255,120 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
         <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
           <p className="text-sm font-semibold text-gray-700">상세 입력</p>
 
+          {/* 건별 사용내역 (현장 단위 실비 — 정산서 세부 사용내역 서식) */}
+          {supportsItems && (
+            <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-gray-600">🧾 건별 사용내역 (구매일시·구매처·구매내용·금액)</p>
+                <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                  <input type="checkbox" checked={vatExclude} onChange={(e) => setVatExclude(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600" />
+                  적용금액 VAT 제외 (÷1.1)
+                </label>
+              </div>
+              {items.length > 0 && (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-gray-500">
+                      <th className="py-1 text-left">사용일자</th>
+                      <th className="py-1 text-left">구매처</th>
+                      <th className="py-1 text-left">내용</th>
+                      {isWelfare && <th className="py-1 text-left">구분</th>}
+                      <th className="py-1 text-right">금액</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((it, idx) => (
+                      <tr key={idx}>
+                        <td className="py-1 pr-1.5">
+                          <input type="date" value={it.date} onChange={(e) => updItem(idx, { date: e.target.value })}
+                            className="rounded border border-gray-300 px-1.5 py-1 text-xs focus:border-blue-500 focus:outline-none" />
+                        </td>
+                        <td className="py-1 pr-1.5">
+                          <input type="text" value={it.vendor} onChange={(e) => updItem(idx, { vendor: e.target.value })}
+                            placeholder="쿠팡" className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs focus:border-blue-500 focus:outline-none" />
+                        </td>
+                        <td className="py-1 pr-1.5">
+                          <input type="text" value={it.description} onChange={(e) => updItem(idx, { description: e.target.value })}
+                            placeholder="사무용품(종이컵)" className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs focus:border-blue-500 focus:outline-none" />
+                        </td>
+                        {isWelfare && (
+                          <td className="py-1 pr-1.5">
+                            <select value={it.tag} onChange={(e) => updItem(idx, { tag: e.target.value })}
+                              className="rounded border border-gray-300 px-1 py-1 text-xs focus:outline-none">
+                              <option value="식대">식대</option>
+                              <option value="음료">음료</option>
+                              <option value="기타">기타</option>
+                            </select>
+                          </td>
+                        )}
+                        <td className="py-1 w-28">
+                          <input type="text" inputMode="numeric" value={it.amountGross}
+                            onChange={(e) => { const r = e.target.value.replace(/[^0-9]/g, ''); updItem(idx, { amountGross: r ? parseInt(r).toLocaleString('ko-KR') : '' }) }}
+                            className="w-full rounded border border-gray-300 px-1.5 py-1 text-right text-xs focus:border-blue-500 focus:outline-none" />
+                        </td>
+                        <td className="py-1 pl-1">
+                          <button type="button" onClick={() => setItems((p) => p.filter((_, i) => i !== idx))}
+                            className="rounded p-0.5 text-gray-300 hover:text-red-500">✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <button type="button" onClick={() => setItems((p) => [...p, { date: expenseDate, vendor: '', description: '', tag: isWelfare ? '식대' : '', amountGross: '' }])}
+                className="rounded border border-dashed border-gray-400 px-2.5 py-1 text-xs text-gray-600 hover:border-blue-400 hover:text-blue-600">
+                + 내역 추가
+              </button>
+              {hasItems && (
+                <p className="text-xs text-gray-600">
+                  합계 <b>{grossTotal.toLocaleString()}원</b>
+                  {vatExclude && <> → 적용금액(VAT제외) <b className="text-blue-700">{itemized.appliedTotal.toLocaleString()}원</b></>}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* 복리후생비 월별 정산기준 (인정금액 = min(인원×한도, 증빙)) */}
+          {isWelfare && (
+            <div className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm">
+              <p className="text-xs font-semibold text-amber-800">복리후생비 월별 정산기준</p>
+              <div className="flex items-center gap-2 text-xs text-gray-700">
+                <span>상주인원</span>
+                <input
+                  type="number" min="1" value={headcount} onChange={(e) => setHeadcount(e.target.value)}
+                  className="w-16 rounded border border-gray-300 px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-amber-400"
+                />
+                <span>명 × 월한도 {welfareLimit.toLocaleString()}원 = 산출금액 <b>{(welfare?.computedAmount ?? 0).toLocaleString()}원</b></span>
+              </div>
+              <p className="text-xs text-gray-700">
+                증빙금액(건별 VAT제외 합) <b>{(welfare?.evidenceAmount ?? 0).toLocaleString()}원</b>
+                {' '}→ 인정금액 <b className="text-amber-800">{(welfare?.approvedAmount ?? 0).toLocaleString()}원</b>
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
-              금액 <span className="text-red-500">*</span>
+              {isWelfare ? '인정금액 (자동)' : hasItems ? '적용금액 (자동)' : '금액'} {!hasItems && !isWelfare && <span className="text-red-500">*</span>}
             </label>
             <div className="relative">
               <input
                 type="text"
-                value={amount}
+                value={hasItems || isWelfare ? (amountNum > 0 ? amountNum.toLocaleString('ko-KR') : '') : amount}
                 onChange={handleAmountChange}
+                readOnly={hasItems || isWelfare}
                 placeholder="0"
                 className={`w-full rounded-lg border px-3 py-2 pr-8 text-right text-sm focus:outline-none focus:ring-2 ${
                   isOverLimit ? 'border-red-400 bg-red-50 focus:ring-red-300' : 'border-gray-300 focus:ring-blue-300'
-                }`}
+                } ${hasItems || isWelfare ? 'bg-gray-50 text-gray-600' : ''}`}
               />
               <span className="absolute right-3 top-2 text-sm text-gray-400">원</span>
             </div>
+            {!hasItems && !isWelfare && supportsItems && vatExclude && manualAmountNum > 0 && (
+              <p className="mt-1 text-xs text-gray-500">적용금액(VAT제외): {applyVatExclusion(manualAmountNum).toLocaleString()}원으로 저장됩니다</p>
+            )}
           </div>
 
           {subcategory === 'communication' && (
@@ -268,22 +402,6 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
                   <option key={u.id} value={u.id}>{u.full_name}</option>
                 ))}
               </select>
-            </div>
-          )}
-
-          {selectedSub?.limitType === 'welfare' && (
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">인원 수</label>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  min="1"
-                  value={headcount}
-                  onChange={(e) => setHeadcount(e.target.value)}
-                  className="w-20 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                />
-                <span className="text-sm text-gray-500">명</span>
-              </div>
             </div>
           )}
 

@@ -2,10 +2,12 @@
 
 import { useState, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { createStaffCosts, type StaffCostRow } from '@/actions/expenses'
+import { createStaffCosts, type StaffCostRow, type StaffCostMaintItem, type StaffCostCommuteCalc } from '@/actions/expenses'
 import type { Profile, AttendanceRecord } from '@/types'
 import { calcWorkDays } from '@/lib/korean-holidays'
-import { CommuteCalcPanel } from './CommuteCalcPanel'
+import { SPECIALTIES, COMMUTE_MODE_LABELS, type CommuteMode } from '@/lib/constants'
+import { applyVatExclusion, convertJeonseToMonthly } from '@/lib/settlement'
+import { CommuteCalcPanel, type CommuteApplyParams } from './CommuteCalcPanel'
 
 interface Props {
   siteId: string
@@ -15,14 +17,13 @@ interface Props {
   attendance: AttendanceRecord[]
   mealDailyLimit?: number
   applyCommuteRegulation?: boolean
+  commuteTripsDefault?: number
   siteAddress?: string | null
   myUserId?: string
   myHomeAddress?: string | null
   myFuelType?: string | null
 }
 
-const COMMUTE_DAILY = 25000
-const SPECIALTIES = ['책임', '건축', '토목', '기계', '전기', '통신', '안전'] as const
 const ACCEPT = '.jpg,.jpeg,.png,.pdf'
 const MAX_FILES = 5
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
@@ -31,12 +32,12 @@ function parseNum(v: string) { return parseInt(v.replace(/,/g, ''), 10) || 0 }
 function fmt(n: number) { return n > 0 ? n.toLocaleString('ko-KR') : '-' }
 function fmtSize(b: number) { return b < 1024 * 1024 ? `${(b / 1024).toFixed(0)}KB` : `${(b / 1024 / 1024).toFixed(1)}MB` }
 
-function NumInput({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+function NumInput({ value, onChange, disabled, readOnly }: { value: string; onChange?: (v: string) => void; disabled?: boolean; readOnly?: boolean }) {
   return (
     <div className="relative">
-      <input type="text" inputMode="numeric" value={value} disabled={disabled}
-        onChange={(e) => { const r = e.target.value.replace(/[^0-9]/g, ''); onChange(r ? parseInt(r).toLocaleString('ko-KR') : '') }}
-        className="w-full rounded border border-gray-300 px-2 py-1.5 pr-6 text-right text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400" />
+      <input type="text" inputMode="numeric" value={value} disabled={disabled} readOnly={readOnly}
+        onChange={(e) => { if (!onChange) return; const r = e.target.value.replace(/[^0-9]/g, ''); onChange(r ? parseInt(r).toLocaleString('ko-KR') : '') }}
+        className={`w-full rounded border border-gray-300 px-2 py-1.5 pr-6 text-right text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400 ${readOnly ? 'bg-gray-50 text-gray-500' : ''}`} />
       <span className="absolute right-1.5 top-1.5 text-xs text-gray-400">원</span>
     </div>
   )
@@ -59,16 +60,55 @@ const CATEGORY_TO_SUBCATEGORY: Record<ReceiptCategory, string> = {
 }
 
 type AttachedFile = { file: File; preview: string | null; category: ReceiptCategory }
-type Row = { periodStart: string; periodEnd: string; workDays: string; lodgingRent: string; lodgingMaintenance: string; commutePerDay: string; specialty: string }
+
+type MaintItem = { date: string; tag: string; amountGross: string }
+
+type Row = {
+  periodStart: string
+  periodEnd: string
+  workDays: string
+  specialty: string
+  // 숙소임대비: 월세 직접 입력 or 전세 환산 (보증금 × 전환율% ÷ 12)
+  lodgingContract: 'monthly' | 'jeonse'
+  lodgingRent: string
+  deposit: string
+  conversionRate: string
+  // 관리비: 건별 내역 (입금일자·전기/가스·금액) — 합계에서 VAT 제외한 적용금액만 인정
+  maintItems: MaintItem[]
+  // 교통비: 1회 왕복비 × (숙박형: 월횟수 / 출퇴근형: 근무일수)
+  commuteMode: CommuteMode
+  commuteRoundtrip: string
+  commuteTrips: string
+  commuteCalc: StaffCostCommuteCalc | null
+}
 type ExtraRow = Row & { id: string; name: string }
 
-function makeDefaultRow(yearMonth: string, specialty = '건축', commuteDefault = COMMUTE_DAILY): Row {
-  return { periodStart: `${yearMonth}-01`, periodEnd: '', workDays: '0', lodgingRent: '', lodgingMaintenance: '', commutePerDay: commuteDefault > 0 ? commuteDefault.toLocaleString('ko-KR') : '', specialty }
+function makeDefaultRow(yearMonth: string, specialty: string, tripsDefault: number): Row {
+  return {
+    periodStart: `${yearMonth}-01`, periodEnd: '', workDays: '0', specialty,
+    lodgingContract: 'monthly', lodgingRent: '', deposit: '', conversionRate: '5.5',
+    maintItems: [],
+    commuteMode: 'lodging_return', commuteRoundtrip: '', commuteTrips: String(tripsDefault), commuteCalc: null,
+  }
+}
+
+// 행별 파생값 계산 (미리보기용 — 저장 시 서버가 동일 규칙으로 재계산)
+function deriveRow(r: Row, mealDailyLimit: number) {
+  const wd = parseInt(r.workDays) || 0
+  const meal = wd * mealDailyLimit
+  const lodgingRent = r.lodgingContract === 'jeonse'
+    ? convertJeonseToMonthly(parseNum(r.deposit), parseFloat(r.conversionRate) || 0)
+    : parseNum(r.lodgingRent)
+  const maintGross = r.maintItems.reduce((s, i) => s + parseNum(i.amountGross), 0)
+  const maintApplied = maintGross > 0 ? applyVatExclusion(maintGross) : 0
+  const multiplier = r.commuteMode === 'daily_commute' ? wd : (parseInt(r.commuteTrips) || 0)
+  const commuteTotal = parseNum(r.commuteRoundtrip) * multiplier
+  return { wd, meal, lodgingRent, maintGross, maintApplied, multiplier, commuteTotal, subtotal: meal + lodgingRent + maintApplied + commuteTotal }
 }
 
 let extraIdSeq = 0
 
-// 영수증 패널 컴포넌트
+// ── 영수증 패널 ─────────────────────────────────────────────
 function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (files: AttachedFile[]) => void }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
@@ -96,7 +136,6 @@ function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (f
 
   return (
     <div className="border-t border-blue-100 bg-blue-50/40 px-4 py-3 space-y-2.5">
-      {/* 비목 선택 + 드롭존 */}
       <div className="flex items-center gap-2">
         <span className="text-xs font-semibold text-gray-600 whitespace-nowrap">비목 선택</span>
         <div className="flex gap-1.5">
@@ -117,7 +156,6 @@ function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (f
         </div>
       </div>
 
-      {/* 드롭존 */}
       {files.length < MAX_FILES && (
         <div
           onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
@@ -134,7 +172,6 @@ function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (f
         </div>
       )}
 
-      {/* 파일 목록 */}
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {files.map((af, idx) => (
@@ -147,7 +184,6 @@ function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (f
                 <p className="truncate text-xs font-medium text-gray-700">{af.file.name}</p>
                 <p className="text-xs text-gray-400">{fmtSize(af.file.size)}</p>
               </div>
-              {/* 비목 변경 드롭다운 */}
               <select
                 value={af.category}
                 onChange={(e) => changeCategory(idx, e.target.value as ReceiptCategory)}
@@ -169,18 +205,126 @@ function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (f
   )
 }
 
-export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, mealDailyLimit = 25000, applyCommuteRegulation = true, siteAddress, myUserId, myHomeAddress, myFuelType }: Props) {
+// ── 관리비 건별 내역 패널 (정산서 1-1 관리비 사용내역 — 합계에서 VAT 제외) ──
+function MaintenancePanel({ items, onChange }: { items: MaintItem[]; onChange: (items: MaintItem[]) => void }) {
+  const gross = items.reduce((s, i) => s + parseNum(i.amountGross), 0)
+  const applied = gross > 0 ? applyVatExclusion(gross) : 0
+
+  function upd(idx: number, field: keyof MaintItem, val: string) {
+    onChange(items.map((it, i) => i === idx ? { ...it, [field]: val } : it))
+  }
+
+  return (
+    <div className="border-t border-orange-100 bg-orange-50/40 px-4 py-3 space-y-2 text-sm">
+      <p className="text-xs font-semibold text-gray-600">🧾 관리비(전기세·가스비) 건별 내역 — 합계에서 부가세를 제외한 적용금액만 인정됩니다</p>
+      {items.length > 0 && (
+        <table className="w-full max-w-xl text-xs">
+          <thead>
+            <tr className="text-gray-500">
+              <th className="py-1 text-left">입금일자</th>
+              <th className="py-1 text-left">구분</th>
+              <th className="py-1 text-right">금액 (VAT 포함)</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it, idx) => (
+              <tr key={idx}>
+                <td className="py-1 pr-2">
+                  <input type="date" value={it.date} onChange={(e) => upd(idx, 'date', e.target.value)}
+                    className="rounded border border-gray-300 px-1.5 py-1 text-xs focus:border-blue-500 focus:outline-none" />
+                </td>
+                <td className="py-1 pr-2">
+                  <select value={it.tag} onChange={(e) => upd(idx, 'tag', e.target.value)}
+                    className="rounded border border-gray-300 px-1.5 py-1 text-xs focus:border-blue-500 focus:outline-none">
+                    <option value="전기">전기세</option>
+                    <option value="가스">가스비</option>
+                    <option value="기타">기타</option>
+                  </select>
+                </td>
+                <td className="py-1 pr-2 w-32">
+                  <input type="text" inputMode="numeric" value={it.amountGross}
+                    onChange={(e) => { const r = e.target.value.replace(/[^0-9]/g, ''); upd(idx, 'amountGross', r ? parseInt(r).toLocaleString('ko-KR') : '') }}
+                    className="w-full rounded border border-gray-300 px-1.5 py-1 text-right text-xs focus:border-blue-500 focus:outline-none" />
+                </td>
+                <td className="py-1">
+                  <button type="button" onClick={() => onChange(items.filter((_, i) => i !== idx))}
+                    className="rounded p-0.5 text-gray-300 hover:text-red-500">✕</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={() => onChange([...items, { date: '', tag: '전기', amountGross: '' }])}
+          className="rounded border border-dashed border-orange-300 px-2.5 py-1 text-xs text-orange-600 hover:bg-orange-100">
+          + 내역 추가
+        </button>
+        {gross > 0 && (
+          <span className="text-xs text-gray-600">
+            합계 <b>{gross.toLocaleString()}원</b> → 적용금액(VAT제외) <b className="text-orange-700">{applied.toLocaleString()}원</b>
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── 숙소임대비 패널 (월세 / 전세 환산) ──────────────────────────
+function LodgingPanel({ r, onChange }: { r: Row; onChange: (patch: Partial<Row>) => void }) {
+  const converted = convertJeonseToMonthly(parseNum(r.deposit), parseFloat(r.conversionRate) || 0)
+  return (
+    <div className="border-t border-purple-100 bg-purple-50/40 px-4 py-3 space-y-2 text-sm">
+      <div className="flex items-center gap-3">
+        <p className="text-xs font-semibold text-gray-600">🏠 숙소 계약 형태</p>
+        <div className="flex gap-1">
+          {(['monthly', 'jeonse'] as const).map((ct) => (
+            <button key={ct} type="button" onClick={() => onChange({ lodgingContract: ct })}
+              className={`rounded-full px-2.5 py-1 text-xs font-medium ${r.lodgingContract === ct ? 'bg-purple-100 text-purple-700 ring-2 ring-offset-1 ring-current' : 'bg-white text-gray-500 border border-gray-200'}`}>
+              {ct === 'monthly' ? '월세' : '전세 (환산)'}
+            </button>
+          ))}
+        </div>
+      </div>
+      {r.lodgingContract === 'jeonse' && (
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="mb-0.5 block text-xs text-gray-500">전세보증금</label>
+            <input type="text" inputMode="numeric" value={r.deposit}
+              onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ''); onChange({ deposit: v ? parseInt(v).toLocaleString('ko-KR') : '' }) }}
+              placeholder="예: 50,000,000"
+              className="w-40 rounded border border-gray-300 px-2 py-1.5 text-right text-sm focus:border-blue-500 focus:outline-none" />
+          </div>
+          <div>
+            <label className="mb-0.5 block text-xs text-gray-500">전월세 전환율 (연 %)</label>
+            <input type="text" inputMode="decimal" value={r.conversionRate}
+              onChange={(e) => onChange({ conversionRate: e.target.value.replace(/[^0-9.]/g, '') })}
+              className="w-20 rounded border border-gray-300 px-2 py-1.5 text-right text-sm focus:border-blue-500 focus:outline-none" />
+          </div>
+          <p className="pb-1.5 text-xs text-gray-600">
+            환산 월세 = 보증금 × 전환율 ÷ 12 = <b className="text-purple-700">{converted.toLocaleString()}원</b>
+          </p>
+        </div>
+      )}
+      {r.lodgingContract === 'monthly' && (
+        <p className="text-xs text-gray-500">월세 금액을 표의 숙소임대비 칸에 직접 입력하세요.</p>
+      )}
+    </div>
+  )
+}
+
+export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, mealDailyLimit = 25000, applyCommuteRegulation = true, commuteTripsDefault = 4, siteAddress, myUserId, myHomeAddress, myFuelType }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
   const attendanceMap = Object.fromEntries(attendance.map((a) => [a.user_id, a.work_days]))
-  const commuteDefault = applyCommuteRegulation ? COMMUTE_DAILY : 0
 
   const [rows, setRows] = useState<Record<string, Row>>(
     Object.fromEntries(users.map((u, i) => [u.id, {
-      ...makeDefaultRow(yearMonth, SPECIALTIES[i % SPECIALTIES.length], commuteDefault),
+      ...makeDefaultRow(yearMonth, SPECIALTIES[i % SPECIALTIES.length], commuteTripsDefault),
       workDays: String(attendanceMap[u.id] ?? 0),
     }]))
   )
@@ -197,59 +341,45 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
     setRemovedUserIds((p) => new Set(p).add(uid))
   }
 
-  // 영수증: 행 id → 파일 목록
   const [receipts, setReceipts] = useState<Record<string, AttachedFile[]>>({})
-  // 영수증 패널 열림 상태
-  const [openReceipt, setOpenReceipt] = useState<Record<string, boolean>>({})
-
-  function toggleReceipt(id: string) {
-    setOpenReceipt((p) => ({ ...p, [id]: !p[id] }))
-  }
-
-  // 자차 교통비 산출 패널 열림 상태
-  const [openCommute, setOpenCommute] = useState<Record<string, boolean>>({})
-  function toggleCommute(id: string) {
-    setOpenCommute((p) => ({ ...p, [id]: !p[id] }))
+  // 행별 패널 열림 상태: receipt | commute | maint | lodging
+  const [openPanel, setOpenPanel] = useState<Record<string, string | null>>({})
+  function togglePanel(id: string, panel: string) {
+    setOpenPanel((p) => ({ ...p, [id]: p[id] === panel ? null : panel }))
   }
 
   function setRowReceipts(id: string, files: AttachedFile[]) {
     setReceipts((p) => ({ ...p, [id]: files }))
   }
 
-  function upd(uid: string, field: keyof Row, val: string) {
-    setRows((p) => {
-      const updated = { ...p[uid], [field]: val }
-      if (field === 'periodStart' || field === 'periodEnd') {
-        const start = field === 'periodStart' ? val : updated.periodStart
-        const end = field === 'periodEnd' ? val : updated.periodEnd
-        updated.workDays = String(calcWorkDays(start, end))
-      }
-      return { ...p, [uid]: updated }
-    })
+  function getRow(id: string, isExtra: boolean): Row | undefined {
+    return isExtra ? extraRows.find((r) => r.id === id) : rows[id]
   }
 
-  function updExtra(id: string, field: keyof ExtraRow, val: string) {
-    setExtraRows((p) => p.map((r) => {
-      if (r.id !== id) return r
-      const updated = { ...r, [field]: val }
-      if (field === 'periodStart' || field === 'periodEnd') {
-        const start = field === 'periodStart' ? val : r.periodStart
-        const end = field === 'periodEnd' ? val : r.periodEnd
-        updated.workDays = String(calcWorkDays(start, end))
+  function patchRow(id: string, isExtra: boolean, patch: Partial<Row>) {
+    const applyDerived = (r: Row): Row => {
+      const updated = { ...r, ...patch }
+      if ('periodStart' in patch || 'periodEnd' in patch) {
+        updated.workDays = String(calcWorkDays(updated.periodStart, updated.periodEnd))
       }
       return updated
-    }))
+    }
+    if (isExtra) {
+      setExtraRows((p) => p.map((r) => r.id === id ? { ...r, ...applyDerived(r) } : r))
+    } else {
+      setRows((p) => ({ ...p, [id]: applyDerived(p[id]) }))
+    }
   }
 
   function addRow() {
     const id = `extra_${++extraIdSeq}`
-    setExtraRows((p) => [...p, { id, name: '', ...makeDefaultRow(yearMonth, '건축', commuteDefault) }])
+    setExtraRows((p) => [...p, { id, name: '', ...makeDefaultRow(yearMonth, '건축', commuteTripsDefault) }])
   }
 
   function removeRow(id: string) {
     setExtraRows((p) => p.filter((r) => r.id !== id))
     setReceipts((p) => { const n = { ...p }; delete n[id]; return n })
-    setOpenReceipt((p) => { const n = { ...p }; delete n[id]; return n })
+    setOpenPanel((p) => { const n = { ...p }; delete n[id]; return n })
   }
 
   const [year, mon] = yearMonth.split('-')
@@ -266,39 +396,54 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
   for (const { id, sp } of allSpecialties) {
     if (spCount[sp] > 1) {
       spIdx[sp] = (spIdx[sp] ?? 0) + 1
-      spLabels[id] = `(${sp}${spIdx[sp]})`
+      spLabels[id] = `${sp}${spIdx[sp]}`
     } else {
-      spLabels[id] = `(${sp})`
+      spLabels[id] = sp
     }
   }
 
   // 합계
-  const totals = [
-    ...activeUsers.map((u) => rows[u.id]),
-    ...extraRows,
-  ].reduce((acc, r) => {
-    if (!r) return acc
-    const wd = parseInt(r.workDays) || 0
-    acc.meal += wd * mealDailyLimit
-    acc.commute += parseNum(r.commutePerDay) * wd
-    acc.lodgingRent += parseNum(r.lodgingRent)
-    acc.lodgingMaintenance += parseNum(r.lodgingMaintenance)
+  const allRows = [...activeUsers.map((u) => rows[u.id]), ...extraRows].filter(Boolean) as Row[]
+  const totals = allRows.reduce((acc, r) => {
+    const d = deriveRow(r, mealDailyLimit)
+    acc.meal += d.meal
+    acc.commute += d.commuteTotal
+    acc.lodgingRent += d.lodgingRent
+    acc.lodgingMaintenance += d.maintApplied
     return acc
   }, { meal: 0, commute: 0, lodgingRent: 0, lodgingMaintenance: 0 })
   const grandTotal = totals.meal + totals.commute + totals.lodgingRent + totals.lodgingMaintenance
-  const totalWorkDays = [...activeUsers.map((u) => rows[u.id]), ...extraRows].reduce((s, r) => s + (parseInt(r?.workDays ?? '0') || 0), 0)
+  const totalWorkDays = allRows.reduce((s, r) => s + (parseInt(r.workDays) || 0), 0)
+
+  function buildPayloadRow(rowId: string, userId: string, userName: string, r: Row): StaffCostRow {
+    const d = deriveRow(r, mealDailyLimit)
+    return {
+      rowId,
+      userId,
+      userName,
+      specialty: spLabels[rowId] ?? r.specialty,
+      periodStart: r.periodStart || null,
+      periodEnd: r.periodEnd || null,
+      workDays: d.wd,
+      lodgingRent: d.lodgingRent,
+      lodgingCalcDetail: r.lodgingContract === 'jeonse'
+        ? { contractType: 'jeonse', monthlyRent: d.lodgingRent, deposit: parseNum(r.deposit), conversionRatePct: parseFloat(r.conversionRate) || 0, convertedMonthly: d.lodgingRent }
+        : { contractType: 'monthly', monthlyRent: d.lodgingRent },
+      maintenanceItems: r.maintItems
+        .filter((it) => parseNum(it.amountGross) > 0)
+        .map((it) => ({ date: it.date, tag: it.tag, amountGross: parseNum(it.amountGross) })),
+      commuteMode: r.commuteMode,
+      commuteRoundtrip: parseNum(r.commuteRoundtrip),
+      commuteTrips: parseInt(r.commuteTrips) || 0,
+      commuteCalc: r.commuteCalc,
+    }
+  }
 
   function handleSave() {
     setError(null)
     const payload: StaffCostRow[] = [
-      ...activeUsers.map((u) => {
-        const r = rows[u.id]; const wd = parseInt(r.workDays) || 0
-        return { rowId: u.id, userId: u.id, userName: names[u.id] ?? u.full_name, workDays: wd, lodgingRent: parseNum(r.lodgingRent), lodgingMaintenance: parseNum(r.lodgingMaintenance), commute: parseNum(r.commutePerDay) * wd, businessTrip: 0 }
-      }),
-      ...extraRows.map((r) => {
-        const wd = parseInt(r.workDays) || 0
-        return { rowId: r.id, userId: '', userName: r.name || '(추가)', workDays: wd, lodgingRent: parseNum(r.lodgingRent), lodgingMaintenance: parseNum(r.lodgingMaintenance), commute: parseNum(r.commutePerDay) * wd, businessTrip: 0 }
-      }),
+      ...activeUsers.map((u) => buildPayloadRow(u.id, u.id, names[u.id] ?? u.full_name, rows[u.id])),
+      ...extraRows.map((r) => buildPayloadRow(r.id, '', r.name || '(추가)', r)),
     ]
 
     const formData = new FormData()
@@ -320,68 +465,97 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
   }
 
   function RowCells({ id, r, name, isExtra = false }: { id: string; r: Row; name: React.ReactNode; isExtra?: boolean }) {
-    const wd = parseInt(r.workDays) || 0
-    const meal = wd * mealDailyLimit
-    const commuteTotal = parseNum(r.commutePerDay) * wd
-    const subtotal = meal + commuteTotal + parseNum(r.lodgingRent) + parseNum(r.lodgingMaintenance)
-    const updFn = isExtra
-      ? (field: keyof ExtraRow, val: string) => updExtra(id, field, val)
-      : (field: keyof Row, val: string) => upd(id, field, val)
+    const d = deriveRow(r, mealDailyLimit)
+    const patch = (p: Partial<Row>) => patchRow(id, isExtra, p)
     const fileCount = receipts[id]?.length ?? 0
+    const isJeonse = r.lodgingContract === 'jeonse'
     return (
       <>
         <td className="px-4 py-2">
           <div className="flex items-center gap-1.5 flex-wrap">
             {name}
-            <select value={r.specialty} onChange={(e) => updFn('specialty', e.target.value)}
+            <select value={r.specialty} onChange={(e) => patch({ specialty: e.target.value })}
               className="rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-xs text-gray-600 focus:outline-none focus:border-blue-400">
               {SPECIALTIES.map((s) => <option key={s} value={s}>({s})</option>)}
             </select>
-            <span className="text-xs font-semibold text-blue-600">{spLabels[id]}</span>
+            <span className="text-xs font-semibold text-blue-600">({spLabels[id]})</span>
           </div>
         </td>
         <td className="px-3 py-2">
           <div className="flex items-center gap-1">
-            <input type="date" value={r.periodStart} onChange={(e) => updFn('periodStart', e.target.value)}
+            <input type="date" value={r.periodStart} onChange={(e) => patch({ periodStart: e.target.value })}
               className="rounded border border-gray-300 px-1.5 py-1 text-xs focus:border-blue-500 focus:outline-none" />
             <span className="text-gray-400 text-xs">~</span>
-            <input type="date" value={r.periodEnd} onChange={(e) => updFn('periodEnd', e.target.value)}
+            <input type="date" value={r.periodEnd} onChange={(e) => patch({ periodEnd: e.target.value })}
               className="rounded border border-gray-300 px-1.5 py-1 text-xs focus:border-blue-500 focus:outline-none" />
           </div>
         </td>
         <td className="px-3 py-2 text-center">
-          <input type="number" min={0} max={62} value={r.workDays} onChange={(e) => updFn('workDays', e.target.value)}
+          <input type="number" min={0} max={62} value={r.workDays} onChange={(e) => patch({ workDays: e.target.value })}
             className="w-14 rounded border border-gray-300 px-2 py-1.5 text-center text-sm focus:border-blue-500 focus:outline-none" />
         </td>
-        <td className="px-3 py-2"><NumInput value={r.lodgingRent} onChange={(v) => updFn('lodgingRent', v)} /></td>
-        <td className="px-3 py-2"><NumInput value={r.lodgingMaintenance} onChange={(v) => updFn('lodgingMaintenance', v)} /></td>
+        <td className="px-3 py-2">
+          <NumInput
+            value={isJeonse ? (d.lodgingRent > 0 ? d.lodgingRent.toLocaleString('ko-KR') : '') : r.lodgingRent}
+            onChange={isJeonse ? undefined : (v) => patch({ lodgingRent: v })}
+            readOnly={isJeonse}
+          />
+          <button type="button" onClick={() => togglePanel(id, 'lodging')}
+            className="mt-0.5 w-full text-center text-xs text-purple-600 hover:underline">
+            🏠 {isJeonse ? '전세 환산' : '계약 형태'}
+          </button>
+        </td>
+        <td className="px-3 py-2">
+          <NumInput value={d.maintApplied > 0 ? d.maintApplied.toLocaleString('ko-KR') : ''} readOnly />
+          <button type="button" onClick={() => togglePanel(id, 'maint')}
+            className="mt-0.5 w-full text-center text-xs text-orange-600 hover:underline">
+            🧾 내역 {r.maintItems.length > 0 ? `(${r.maintItems.length}건)` : '입력'}
+          </button>
+        </td>
         <td className="px-3 py-2">
           <div className="relative">
-            <input readOnly value={meal > 0 ? meal.toLocaleString('ko-KR') : ''} placeholder="0"
+            <input readOnly value={d.meal > 0 ? d.meal.toLocaleString('ko-KR') : ''} placeholder="0"
               className="w-full rounded border border-blue-200 bg-blue-50 px-2 py-1.5 pr-6 text-right text-sm font-medium text-blue-700 cursor-default" />
             <span className="absolute right-1.5 top-1.5 text-xs text-blue-400">원</span>
           </div>
-          {wd > 0 && <p className="mt-0.5 text-center text-xs text-gray-400">{wd}일 × {mealDailyLimit.toLocaleString()}</p>}
+          {d.wd > 0 && <p className="mt-0.5 text-center text-xs text-gray-400">{d.wd}일 × {mealDailyLimit.toLocaleString()}</p>}
         </td>
         <td className="px-3 py-2">
-          <NumInput value={r.commutePerDay} onChange={(v) => updFn('commutePerDay', v)} disabled={!applyCommuteRegulation} />
-          {!applyCommuteRegulation && <p className="mt-0.5 text-center text-xs text-gray-400">여비규정 미적용 현장</p>}
+          <select value={r.commuteMode} onChange={(e) => patch({ commuteMode: e.target.value as CommuteMode })}
+            disabled={!applyCommuteRegulation}
+            className="mb-1 w-full rounded border border-gray-200 bg-gray-50 px-1 py-0.5 text-xs text-gray-600 focus:outline-none focus:border-blue-400 disabled:text-gray-400">
+            {Object.entries(COMMUTE_MODE_LABELS).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+          </select>
+          <NumInput value={r.commuteRoundtrip} onChange={(v) => patch({ commuteRoundtrip: v, commuteCalc: null })} disabled={!applyCommuteRegulation} />
+          {!applyCommuteRegulation && <p className="mt-0.5 text-center text-xs text-gray-400">여비규정 미적용</p>}
           {applyCommuteRegulation && (
-            <button type="button" onClick={() => toggleCommute(id)}
+            <button type="button" onClick={() => togglePanel(id, 'commute')}
               className="mt-0.5 w-full text-center text-xs text-green-600 hover:underline">
               🚗 자차 산출
             </button>
           )}
         </td>
-        <td className="px-3 py-2 text-center font-medium text-blue-700">{commuteTotal > 0 ? commuteTotal.toLocaleString() : '-'}</td>
-        <td className="px-3 py-2 text-right font-semibold text-gray-800">{subtotal > 0 ? subtotal.toLocaleString() : '-'}</td>
+        <td className="px-3 py-2 text-center">
+          {r.commuteMode === 'lodging_return' ? (
+            <input type="number" min={0} max={10} value={r.commuteTrips} disabled={!applyCommuteRegulation}
+              onChange={(e) => patch({ commuteTrips: e.target.value })}
+              className="w-12 rounded border border-gray-300 px-1 py-1.5 text-center text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100" />
+          ) : (
+            <span className="text-xs text-gray-500">{d.wd}일</span>
+          )}
+        </td>
+        <td className="px-3 py-2 text-center font-medium text-blue-700">
+          {d.commuteTotal > 0 ? d.commuteTotal.toLocaleString() : '-'}
+          {d.commuteTotal > 0 && <p className="text-xs font-normal text-gray-400">×{d.multiplier}{r.commuteMode === 'lodging_return' ? '회' : '일'}</p>}
+        </td>
+        <td className="px-3 py-2 text-right font-semibold text-gray-800">{d.subtotal > 0 ? d.subtotal.toLocaleString() : '-'}</td>
         <td className="px-2 py-2 text-center">
           <button
             type="button"
-            onClick={() => toggleReceipt(id)}
+            onClick={() => togglePanel(id, 'receipt')}
             title="영수증 첨부"
             className={`relative inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
-              openReceipt[id]
+              openPanel[id] === 'receipt'
                 ? 'bg-blue-100 text-blue-700'
                 : fileCount > 0
                   ? 'bg-green-50 text-green-700 hover:bg-green-100'
@@ -400,7 +574,48 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
     )
   }
 
-  // 각 행 id에 대해 tr + 영수증 패널 tr 쌍으로 렌더링
+  // 행별 하단 패널 렌더링 (영수증 / 자차산출 / 관리비 내역 / 숙소 계약)
+  function RowPanels({ id, isExtra }: { id: string; isExtra: boolean }) {
+    const r = getRow(id, isExtra)
+    if (!r || !openPanel[id]) return null
+    const panel = openPanel[id]
+    return (
+      <tr>
+        <td colSpan={12} className="p-0">
+          {panel === 'receipt' && (
+            <ReceiptPanel files={receipts[id] ?? []} onChange={(files) => setRowReceipts(id, files)} />
+          )}
+          {panel === 'commute' && (
+            <CommuteCalcPanel
+              siteAddress={siteAddress ?? ''}
+              isOwnRow={id === myUserId}
+              defaultHomeAddress={id === myUserId ? myHomeAddress : undefined}
+              defaultFuelType={id === myUserId ? myFuelType : undefined}
+              onApply={(params: CommuteApplyParams) => patchRow(id, isExtra, {
+                commuteRoundtrip: params.costPerTrip.toLocaleString('ko-KR'),
+                commuteCalc: {
+                  homeAddress: params.homeAddress,
+                  distanceOnewayKm: params.distanceOnewayKm,
+                  fuelType: params.fuelType,
+                  fuelEfficiency: params.fuelEfficiency,
+                  fuelPrice: params.fuelPrice,
+                  fuelPriceDate: params.fuelPriceDate,
+                  tollRoundtrip: params.tollRoundtrip,
+                },
+              })}
+            />
+          )}
+          {panel === 'maint' && (
+            <MaintenancePanel items={r.maintItems} onChange={(items) => patchRow(id, isExtra, { maintItems: items })} />
+          )}
+          {panel === 'lodging' && (
+            <LodgingPanel r={r} onChange={(patch) => patchRow(id, isExtra, patch)} />
+          )}
+        </td>
+      </tr>
+    )
+  }
+
   function UserRow({ u }: { u: Profile }) {
     const id = u.id
     return (
@@ -420,29 +635,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
             </button>
           </td>
         </tr>
-        {openReceipt[id] && (
-          <tr>
-            <td colSpan={11} className="p-0">
-              <ReceiptPanel
-                files={receipts[id] ?? []}
-                onChange={(files) => setRowReceipts(id, files)}
-              />
-            </td>
-          </tr>
-        )}
-        {openCommute[id] && (
-          <tr>
-            <td colSpan={11} className="p-0">
-              <CommuteCalcPanel
-                siteAddress={siteAddress ?? ''}
-                isOwnRow={id === myUserId}
-                defaultHomeAddress={id === myUserId ? myHomeAddress : undefined}
-                defaultFuelType={id === myUserId ? myFuelType : undefined}
-                onApply={(amount) => upd(id, 'commutePerDay', amount.toLocaleString('ko-KR'))}
-              />
-            </td>
-          </tr>
-        )}
+        <RowPanels id={id} isExtra={false} />
       </>
     )
   }
@@ -454,7 +647,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
           <RowCells id={r.id} r={r} isExtra name={
             <input
               type="text" value={r.name} placeholder="이름 입력"
-              onChange={(e) => updExtra(r.id, 'name', e.target.value)}
+              onChange={(e) => setExtraRows((p) => p.map((row) => row.id === r.id ? { ...row, name: e.target.value } : row))}
               className="w-20 rounded border border-gray-300 px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 focus:outline-none"
             />
           } />
@@ -465,27 +658,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
             </button>
           </td>
         </tr>
-        {openCommute[r.id] && (
-          <tr>
-            <td colSpan={11} className="p-0">
-              <CommuteCalcPanel
-                siteAddress={siteAddress ?? ''}
-                isOwnRow={false}
-                onApply={(amount) => updExtra(r.id, 'commutePerDay', amount.toLocaleString('ko-KR'))}
-              />
-            </td>
-          </tr>
-        )}
-        {openReceipt[r.id] && (
-          <tr>
-            <td colSpan={11} className="p-0">
-              <ReceiptPanel
-                files={receipts[r.id] ?? []}
-                onChange={(files) => setRowReceipts(r.id, files)}
-              />
-            </td>
-          </tr>
-        )}
+        <RowPanels id={r.id} isExtra />
       </>
     )
   }
@@ -506,16 +679,17 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
       {success && <div className="rounded-lg bg-green-50 px-4 py-3 text-sm text-green-700">저장되었습니다. 이동 중...</div>}
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-        <table className="w-full min-w-[960px] text-sm">
+        <table className="w-full min-w-[1080px] text-sm">
           <thead className="bg-gray-50 text-xs font-medium text-gray-500">
             <tr>
               <th className="px-4 py-3 text-left whitespace-nowrap">성명</th>
               <th className="px-3 py-3 text-center whitespace-nowrap">근무기간</th>
               <th className="px-3 py-3 text-center whitespace-nowrap">근무일수</th>
               <th className="px-3 py-3 text-center whitespace-nowrap w-32">숙소임대비</th>
-              <th className="px-3 py-3 text-center w-32">관리비<br/><span className="font-normal text-gray-400">(전기·가스)</span></th>
+              <th className="px-3 py-3 text-center w-32">관리비<br/><span className="font-normal text-gray-400">(적용금액·VAT제외)</span></th>
               <th className="px-3 py-3 text-center whitespace-nowrap">식대 <span className="text-blue-600 font-normal">(자동)</span></th>
-              <th className="px-3 py-3 text-center w-28">교통비<br/><span className="font-normal text-gray-400">원당</span></th>
+              <th className="px-3 py-3 text-center w-32">교통비<br/><span className="font-normal text-gray-400">1회 왕복비</span></th>
+              <th className="px-3 py-3 text-center whitespace-nowrap">횟수</th>
               <th className="px-3 py-3 text-center whitespace-nowrap">교통비 합계</th>
               <th className="px-3 py-3 text-right whitespace-nowrap">소계</th>
               <th className="px-2 py-3 text-center whitespace-nowrap">영수증</th>
@@ -535,6 +709,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
               <td className="px-3 py-3 text-right">{fmt(totals.lodgingMaintenance)}</td>
               <td className="px-3 py-3 text-center text-blue-700">{fmt(totals.meal)}</td>
               <td className="px-3 py-3 text-center text-gray-400">—</td>
+              <td className="px-3 py-3 text-center text-gray-400">—</td>
               <td className="px-3 py-3 text-center text-blue-700">{fmt(totals.commute)}</td>
               <td className="px-3 py-3 text-right text-blue-700">{grandTotal.toLocaleString()}</td>
               <td />
@@ -544,7 +719,6 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
         </table>
       </div>
 
-      {/* 행 추가 버튼 */}
       <button type="button" onClick={addRow}
         className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-300 py-2.5 text-sm font-medium text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors">
         + 행 추가

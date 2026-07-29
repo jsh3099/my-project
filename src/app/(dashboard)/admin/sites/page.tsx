@@ -89,7 +89,10 @@ export default async function SitesPage() {
                           기성회차
                         </Button>
                       </Link>
-                      <form action={deleteSite.bind(null, site.id)}>
+                      <form action={async () => {
+                        'use server'
+                        await deleteSite(site.id)
+                      }}>
                         <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-50">
                           삭제
                         </Button>

@@ -42,8 +42,9 @@ export const MID_CATEGORY_ORDER: MidCategory[] = ['lodging', 'transport', 'site_
 //   - manual_recurring : 인원별 주재비 화면, 개인별 실비 수기입력 (임대비·관리비 = 개인별 계약)
 //   - manual_person     : 직접경비 입력 화면, 대상자를 지정해 실비 수기입력 (출장·현지사무원)
 //   - manual_site       : 직접경비 입력 화면, 현장 단위 실비 수기입력 (대상자 지정 없음)
+//   - auto_trip         : 기술지원 출장비 화면, 방문일별 자동산출 (유류비+통행료+일비+식비)
 // midCategory: 정산서 출력 시 묶이는 중분류 (현재는 현장주재비 세부항목에만 존재)
-export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; label: string; limitType?: 'meal' | 'welfare' | 'commute' | 'vehicle_maintenance'; requireDocs: string[]; notes?: string; entryType: 'auto_recurring' | 'manual_recurring' | 'manual_person' | 'manual_site'; midCategory?: MidCategory }[]> = {
+export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; label: string; limitType?: 'meal' | 'welfare' | 'commute' | 'vehicle_maintenance'; requireDocs: string[]; notes?: string; entryType: 'auto_recurring' | 'manual_recurring' | 'manual_person' | 'manual_site' | 'auto_trip'; midCategory?: MidCategory }[]> = {
   site_residence: [
     {
       value: 'lodging_rent',
@@ -70,10 +71,10 @@ export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; lab
     },
     {
       value: 'commute',
-      label: '교통비 (출퇴근)',
+      label: '교통비',
       limitType: 'commute',
-      requireDocs: ['출근부', '승차권 (월4회 현장↔주거지)', '자차 이용 시 통행료·연비계산서'],
-      notes: '상주기술인에 한해 적용 · 1인 1일 25,000원 × 근무일수 자동계산',
+      requireDocs: ['출근부', '교통비 산출서 (지도 경로·거리)', '자차 이용 시 통행료·연비계산서'],
+      notes: '상주기술인 한정 · 숙박형: 왕복비 × 월횟수(귀가 월4회 원칙) / 출퇴근형: 왕복비 × 근무일수',
       entryType: 'auto_recurring',
       midCategory: 'transport',
     },
@@ -88,6 +89,13 @@ export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; lab
       value: 'safety_supplies',
       label: '안전용품비',
       requireDocs: ['용품구입 영수증', '세금계산서'],
+      entryType: 'manual_site',
+      midCategory: 'site_operation',
+    },
+    {
+      value: 'office_equipment',
+      label: '사무기기비',
+      requireDocs: ['거래명세서', '세금계산서'],
       entryType: 'manual_site',
       midCategory: 'site_operation',
     },
@@ -163,6 +171,13 @@ export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; lab
       label: '교통비',
       requireDocs: ['교통 영수증', '승차권'],
       entryType: 'manual_person',
+    },
+    {
+      value: 'support_trip',
+      label: '기술지원 출장비',
+      requireDocs: ['출장비 산출서 (지도 경로·거리)', '출근부'],
+      notes: '방문일별 자동산출 · 왕복유류비 + 통행료 + 일비 + 식비 (공무원 여비규정)',
+      entryType: 'auto_trip',
     },
   ],
   local_staff: [
@@ -270,6 +285,24 @@ export type StaffType = (typeof STAFF_TYPES)[keyof typeof STAFF_TYPES]
 export const STAFF_TYPE_LABELS: Record<StaffType, string> = {
   resident: '상주기술인',
   support: '기술지원 기술인',
+}
+
+// ── 인원 직종 (정산서 세부내역 "성명(직종)" 표기용, 중복 시 번호 부여: 건축1, 건축2 …) ──
+export const SPECIALTIES = ['책임', '건축', '토목', '기계', '전기', '통신', '안전', '소방', '조경'] as const
+
+// ── 상주기술인 교통비 유형 ──────────────────────────────────
+// lodging_return: 숙박형(원거리) — 자택↔현장 왕복비 × 월횟수 (주말 귀가, 월4회 원칙)
+// daily_commute : 출퇴근형(근거리) — 자택↔현장 왕복비 × 근무일수 (숙소비 없음)
+export const COMMUTE_MODES = {
+  LODGING_RETURN: 'lodging_return',
+  DAILY_COMMUTE: 'daily_commute',
+} as const
+
+export type CommuteMode = (typeof COMMUTE_MODES)[keyof typeof COMMUTE_MODES]
+
+export const COMMUTE_MODE_LABELS: Record<CommuteMode, string> = {
+  lodging_return: '숙박형 (월횟수)',
+  daily_commute: '출퇴근형 (근무일수)',
 }
 
 export const SITE_STATUS = {
