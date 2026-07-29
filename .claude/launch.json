@@ -3,10 +3,16 @@
   "configurations": [
     {
       "name": "jsh3099-my-project",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "C:\\Users\\user\\Desktop\\2026.7.21my-project\\.claude\\dev-wrapper.cmd",
+      "runtimeArgs": [],
       "port": 3001,
       "autoPort": true
+    },
+    {
+      "name": "prod-verify",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "start", "-p", "3002"],
+      "port": 3002
     }
   ]
 }
