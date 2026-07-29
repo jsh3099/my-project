@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { ExpenseForm } from '@/components/expenses/ExpenseForm'
+import { getSiteBudgetStatus } from '@/lib/budgetStatus'
 import type { Site, SiteParameters, Profile } from '@/types'
 
 export default async function NewExpensePage() {
@@ -57,6 +58,9 @@ export default async function NewExpensePage() {
     }
   }
 
+  // 현장별 항목별 계상 잔액 (비목 선택 시 잔액 안내·초과 경고용)
+  const budgetBySite = await getSiteBudgetStatus(supabase, createAdminClient(), sites)
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
@@ -70,7 +74,7 @@ export default async function NewExpensePage() {
           <p className="mt-1 text-sm text-yellow-600">시스템 관리자에게 현장 배정을 요청하세요.</p>
         </div>
       ) : (
-        <ExpenseForm sites={sites} paramsMap={paramsMap} userId={user.id} staffBySite={staffBySite} />
+        <ExpenseForm sites={sites} paramsMap={paramsMap} userId={user.id} staffBySite={staffBySite} budgetBySite={budgetBySite} />
       )}
     </div>
   )

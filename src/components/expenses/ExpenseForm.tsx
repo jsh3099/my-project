@@ -9,6 +9,7 @@ import {
   type ExpenseCategory,
 } from '@/lib/constants'
 import type { Site, SiteParameters, Profile } from '@/types'
+import type { SiteBudgetStatus } from '@/lib/budgetStatus'
 import { createExpense } from '@/actions/expenses'
 import { applyVatExclusion, calcItemized, calcWelfare } from '@/lib/settlement'
 
@@ -20,6 +21,8 @@ interface Props {
   paramsMap: Record<string, SiteParameters>
   userId: string
   staffBySite: Record<string, Profile[]>
+  /** 현장별 항목별 계상 잔액 (잔액 안내·초과 경고용, 미전달 시 안내 생략) */
+  budgetBySite?: Record<string, SiteBudgetStatus>
 }
 
 function today() {
@@ -31,7 +34,7 @@ function currentYearMonth() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
+export function ExpenseForm({ sites, paramsMap, staffBySite, budgetBySite }: Props) {
   const router = useRouter()
 
   const [siteId, setSiteId] = useState(sites[0]?.id ?? '')
@@ -89,6 +92,20 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
   const limitWarning = isOverLimit && welfare
     ? `복리후생비 한도 초과: 산출 ${welfare.computedAmount.toLocaleString()}원(${headcountNum}명 × ${welfareLimit.toLocaleString()}) < 증빙 ${welfare.evidenceAmount.toLocaleString()}원 → 인정 ${welfare.approvedAmount.toLocaleString()}원, 초과분 ${overLimitAmount.toLocaleString()}원 불인정`
     : ''
+
+  // ── 항목별 계상 잔액 안내·초과 경고 ──────────────────────────
+  // 잔액 = 계상금액 - 누계 사용(확정 청구 + 미편입 인정액). 항목 초과는 직접경비
+  // 총액 내에서 흡수 가능하지만, 총액 잔액까지 초과하면 청구할 수 없다.
+  const siteBudget = budgetBySite?.[siteId]
+  const hasBudgetInfo = !!siteBudget && Object.values(siteBudget.byCategory).some((c) => c.budget > 0)
+  const catBudget = category && siteBudget ? siteBudget.byCategory[category] : undefined
+  const catRemaining = catBudget ? catBudget.budget - catBudget.used : null
+  const totalRemaining = siteBudget ? siteBudget.totalBudget - siteBudget.totalUsed : null
+  const overTotalAmount =
+    hasBudgetInfo && totalRemaining !== null && amountNum > 0 ? Math.max(0, amountNum - Math.max(0, totalRemaining)) : 0
+  const overCategoryOnly =
+    overTotalAmount === 0 &&
+    !!catBudget && catBudget.budget > 0 && catRemaining !== null && amountNum > 0 && amountNum > Math.max(0, catRemaining)
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files ?? [])
@@ -186,6 +203,8 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {(Object.keys(EXPENSE_CATEGORIES) as (keyof typeof EXPENSE_CATEGORIES)[]).map((key) => {
             const val = EXPENSE_CATEGORIES[key]
+            const b = siteBudget?.byCategory[val]
+            const remaining = b && b.budget > 0 ? b.budget - b.used : null
             return (
               <button
                 key={val}
@@ -198,6 +217,11 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
                 }`}
               >
                 {EXPENSE_CATEGORY_LABELS[val]}
+                {remaining !== null && (
+                  <span className={`mt-0.5 block text-xs font-normal ${remaining < 0 ? 'text-red-500' : 'opacity-60'}`}>
+                    {remaining < 0 ? `계상 초과 ${(-remaining).toLocaleString()}원` : `잔액 ${remaining.toLocaleString()}원`}
+                  </span>
+                )}
               </button>
             )
           })}
@@ -420,6 +444,29 @@ export function ExpenseForm({ sites, paramsMap, staffBySite }: Props) {
           {limitWarning && (
             <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
               ⚠️ {limitWarning}
+            </div>
+          )}
+
+          {/* 계상 잔액 안내·초과 경고 */}
+          {hasBudgetInfo && catBudget && catBudget.budget > 0 && amountNum === 0 && (
+            <p className="text-xs text-gray-500">
+              이 항목 계상 잔액 {Math.max(0, catRemaining ?? 0).toLocaleString()}원 · 직접경비 총액 잔액{' '}
+              {Math.max(0, totalRemaining ?? 0).toLocaleString()}원
+            </p>
+          )}
+          {overCategoryOnly && (
+            <div className="rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm text-orange-700">
+              이 금액을 저장하면 <b>{EXPENSE_CATEGORY_LABELS[category as ExpenseCategory]}</b> 항목의 계상 잔액
+              ({Math.max(0, catRemaining ?? 0).toLocaleString()}원)을 초과합니다. 직접경비 총액 잔액
+              ({Math.max(0, totalRemaining ?? 0).toLocaleString()}원) 내이므로 타 항목 잔액에서 흡수 가능하지만,
+              본사 정산 담당자와 협의하세요.
+            </div>
+          )}
+          {overTotalAmount > 0 && (
+            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+              ⚠️ 직접경비 총액 잔액({Math.max(0, totalRemaining ?? 0).toLocaleString()}원)을 초과합니다 —
+              초과분 <b>{overTotalAmount.toLocaleString()}원은 발주청에 청구할 수 없어 미지급될 수 있습니다.</b>{' '}
+              저장은 가능하지만 본사 정산 담당자에게 확인하세요.
             </div>
           )}
         </div>
