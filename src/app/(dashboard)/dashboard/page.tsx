@@ -1,9 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { PlusCircle, ClipboardList, AlertTriangle, CheckCircle, Clock, TrendingUp } from 'lucide-react'
+import { PlusCircle, ClipboardList, AlertTriangle, CheckCircle, Clock, TrendingUp, Wallet } from 'lucide-react'
 import { EXPENSE_CATEGORY_LABELS, EXPENSE_STATUS_LABELS, type ExpenseCategory } from '@/lib/constants'
-import type { Expense, Site } from '@/types'
+import type { Expense, Site, SettlementRoundItem } from '@/types'
 
 function formatKRW(n: number) {
   return n.toLocaleString('ko-KR') + '원'
@@ -63,6 +64,60 @@ export default async function DashboardPage() {
   }
 
   const totalBudget = sites.reduce((s, site) => s + (site.direct_expense_budget ?? 0), 0)
+
+  // ── 항목별 계상 잔액 (계약 전체 기준) ──────────────────────────
+  // 계상금액(site_expense_budgets) 대비 누계 사용 = 확정 회차 청구액 스냅샷
+  // + 아직 회차에 편입되지 않은 현장 전체 인정액(임시저장·제출 포함).
+  // 삭감은 현장 단위로 발생하므로 본인 입력분이 아닌 현장 전체 기준으로 집계한다.
+  type BudgetStatus = { category: string; budget: number; usedCum: number; remaining: number; pct: number }
+  let budgetStatus: BudgetStatus[] = []
+  if (siteIds.length > 0) {
+    const admin = createAdminClient()
+    const [{ data: budgetRows }, { data: confirmedRounds }, { data: ongoingRows }] = await Promise.all([
+      supabase.from('site_expense_budgets').select('category, amount').in('site_id', siteIds),
+      supabase.from('settlement_rounds').select('id').in('site_id', siteIds).eq('status', 'confirmed'),
+      admin
+        .from('expenses')
+        .select('category, amount, over_limit_amount')
+        .in('site_id', siteIds)
+        .is('settlement_round_id', null)
+        .in('status', ['draft', 'submitted'])
+        .is('deleted_at', null),
+    ])
+
+    const budgetByCategory = new Map<string, number>()
+    for (const b of budgetRows ?? []) {
+      budgetByCategory.set(b.category, (budgetByCategory.get(b.category) ?? 0) + b.amount)
+    }
+
+    const usedByCategory = new Map<string, number>()
+    const roundIds = (confirmedRounds ?? []).map((r) => r.id)
+    if (roundIds.length > 0) {
+      const { data: itemRows } = await supabase
+        .from('settlement_round_items')
+        .select('category, claim_amount')
+        .in('round_id', roundIds)
+      for (const row of (itemRows ?? []) as Pick<SettlementRoundItem, 'category' | 'claim_amount'>[]) {
+        usedByCategory.set(row.category, (usedByCategory.get(row.category) ?? 0) + row.claim_amount)
+      }
+    }
+    for (const e of ongoingRows ?? []) {
+      usedByCategory.set(e.category, (usedByCategory.get(e.category) ?? 0) + (e.amount - e.over_limit_amount))
+    }
+
+    budgetStatus = [...budgetByCategory.entries()]
+      .filter(([, budget]) => budget > 0)
+      .map(([category, budget]) => {
+        const usedCum = usedByCategory.get(category) ?? 0
+        return {
+          category,
+          budget,
+          usedCum,
+          remaining: budget - usedCum,
+          pct: Math.round((usedCum / budget) * 100),
+        }
+      })
+  }
 
   return (
     <div className="space-y-6">
@@ -124,6 +179,42 @@ export default async function DashboardPage() {
               <p className="mt-1 text-xs text-gray-400">{overLimitCount === 0 ? '모두 정상' : '불인정 처리됨'}</p>
             </div>
           </div>
+
+          {/* 항목별 계상 잔액 (계약 전체 기준) */}
+          {budgetStatus.length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+              <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <Wallet className="h-4 w-4 text-blue-500" />
+                항목별 계상 잔액
+              </h2>
+              <p className="mb-4 text-xs text-gray-400">
+                계약 전체 기준 — 확정 기성 + 미편입 입력분(현장 전체) 합산. 잔액이 남으면 삭감될 수 있습니다.
+              </p>
+              <div className="space-y-3">
+                {budgetStatus.map((b) => {
+                  const over = b.remaining < 0
+                  const barPct = Math.min(100, Math.max(0, b.pct))
+                  const barColor = over ? 'bg-red-500' : b.pct >= 80 ? 'bg-yellow-500' : 'bg-blue-500'
+                  return (
+                    <div key={b.category}>
+                      <div className="mb-1 flex justify-between text-xs text-gray-600">
+                        <span>{EXPENSE_CATEGORY_LABELS[b.category as ExpenseCategory] ?? b.category}</span>
+                        <span className="font-medium">
+                          {formatKRW(b.usedCum)} / {formatKRW(b.budget)} ({b.pct}%)
+                          <span className={`ml-2 ${over ? 'text-red-500' : 'text-gray-400'}`}>
+                            {over ? `초과 ${formatKRW(-b.remaining)}` : `잔액 ${formatKRW(b.remaining)}`}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-gray-100">
+                        <div className={`h-2 rounded-full ${barColor}`} style={{ width: `${barPct}%` }} />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* 비목별 사용 현황 */}
           {Object.keys(byCategory).length > 0 && (
