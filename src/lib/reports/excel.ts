@@ -4,7 +4,7 @@
 //            복리후생비 / 2-1 출장비 / 도서인쇄비 — 데이터가 없는 시트는 생략
 
 import ExcelJS from 'exceljs'
-import { EXPENSE_SUBCATEGORIES, STAFF_TYPE_LABELS } from '@/lib/constants'
+import { EXPENSE_SUBCATEGORIES, EXPENSE_CATEGORY_LABELS, STAFF_TYPE_LABELS, type ExpenseCategory } from '@/lib/constants'
 import type { SettlementReportData, PersonExpense } from './reportData'
 import { recognized } from './reportData'
 
@@ -146,24 +146,38 @@ function buildSummarySheet(wb: ExcelJS.Workbook, data: SettlementReportData, sec
   r5.getCell(7).font = { bold: true }
   ws.addRow([])
 
-  // 2. 직접경비 사용금액 (비목별 전회/금회/잔액)
+  // 2. 직접경비 사용금액 (항목별 계약금액/전회누계/금회기성/잔액 — 청구액 기준)
   addTitle(ws, '2. 직접경비 사용금액', SPAN)
-  addRow(ws, ['항목', '계약금액', '전회기성금액', '금회기성금액', '잔액', '비고', ''], { bold: true, fill: HEAD_FILL })
-  let priorTotal = 0
-  for (const cat of data.summaryTree) {
-    const prior = data.priorByCategory.get(cat.category) ?? 0
-    priorTotal += prior
-    addRow(ws, [cat.label, '-', num(prior), cat.amount, '-', '', ''])
+  addRow(ws, ['항목', '계약금액', '전회누계금액', '금회기성금액', '잔액', '비고', ''], { bold: true, fill: HEAD_FILL })
+  const visibleItems = data.claimItems.filter(
+    (i) => i.contractAmount > 0 || i.priorCumulative > 0 || i.usedAmount > 0 || i.claimAmount > 0,
+  )
+  for (const item of visibleItems) {
+    const label = EXPENSE_CATEGORY_LABELS[item.category as ExpenseCategory] ?? item.category
+    addRow(ws, [
+      label,
+      item.contractAmount > 0 ? item.contractAmount : '-',
+      num(item.priorCumulative),
+      item.claimAmount,
+      item.contractAmount > 0 ? item.remaining : '-',
+      '',
+      '',
+    ])
   }
-  // 이번 회차에 지출이 없지만 전회 누계가 있는 비목도 표기
-  for (const [category, prior] of data.priorByCategory) {
-    if (!data.summaryTree.some((c) => c.category === category)) {
-      priorTotal += 0
-      addRow(ws, [category, '-', prior, 0, '-', '', ''])
-    }
+  const remain = data.site.direct_expense_budget - data.priorCumulative - data.claimTotal
+  addRow(ws, ['합 계', data.site.direct_expense_budget, num(data.priorCumulative), data.claimTotal, remain, '', ''], { bold: true, fill: SUBTOTAL_FILL })
+  // 항목 간 이동 허용 각주 (실제 정산서 관행)
+  const note = ws.addRow(['※ 건설엔지니어링 대가 등에 관한 기준(국토교통부 고시 제2023-580호) [별표2] 직접경비의 항목별 비용은 직접경비 내에서 변경이 가능하며, 발주청은 공사 및 지역 특성 등을 고려하여 직접경비를 증·감할 수 있다.'])
+  ws.mergeCells(note.number, 1, note.number, SPAN)
+  note.getCell(1).font = { size: 9 }
+  note.getCell(1).alignment = { wrapText: true, vertical: 'top' }
+  note.height = 26
+  if (data.unpaidAmount > 0) {
+    const warn = ws.addRow([`※ 금회 사용액 ${data.currentAmount.toLocaleString('ko-KR')}원 중 계상 잔액을 초과한 ${data.unpaidAmount.toLocaleString('ko-KR')}원은 청구 대상에서 제외되었습니다.`])
+    ws.mergeCells(warn.number, 1, warn.number, SPAN)
+    warn.getCell(1).font = { size: 9, color: { argb: 'FFCC0000' } }
+    warn.getCell(1).alignment = { wrapText: true, vertical: 'top' }
   }
-  const remain = data.site.direct_expense_budget - data.priorCumulative - data.currentAmount
-  addRow(ws, ['합 계', data.site.direct_expense_budget, num(priorTotal || data.priorCumulative), data.currentAmount, remain, '', ''], { bold: true, fill: SUBTOTAL_FILL })
   ws.addRow([])
 
   // 3. 항목별 사용금액

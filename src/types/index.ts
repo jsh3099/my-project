@@ -191,11 +191,38 @@ export type SettlementRound = {
   period_start: string
   period_end: string
   status: 'open' | 'confirmed'
+  /** 전회까지 누계 청구(기성)액 스냅샷 */
   prior_cumulative_amount: number
+  /** 금회 사용액(인정금액 기준) 스냅샷 */
   current_round_amount: number
+  /** 금회 계상금액(산출내역서 기준, 선택 입력) — 사용액 비교 경고용 */
+  budgeted_amount: number | null
+  /** 금회 청구(기성)액 = min(사용액, 계상총액 잔액) */
+  claim_amount: number
   confirmed_by: string | null
   confirmed_at: string | null
   created_by: string | null
   created_at: string
   updated_at: string
+}
+
+/** 현장별 항목별 직접경비 계상금액 */
+export type SiteExpenseBudget = {
+  id: string
+  site_id: string
+  category: string
+  amount: number
+  created_at: string
+  updated_at: string
+}
+
+/** 회차×항목 스냅샷 — 정산서 2번 표(계약금액/전회누계/금회기성/잔액)의 원천 */
+export type SettlementRoundItem = {
+  id: string
+  round_id: string
+  category: string
+  contract_amount: number
+  prior_cumulative: number
+  used_amount: number
+  claim_amount: number
 }

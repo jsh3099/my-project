@@ -9,4 +9,5 @@ export { calcCommute, type CommuteCalcInput, type CommuteCalcResult } from './co
 export { calcTripVisit, sumTripVisits, type TripVisitInput, type TripVisitResult } from './tripCalc'
 export { calcItemized, type ItemInput, type ItemizedResult } from './itemizedCalc'
 export { calcWelfare, type WelfareCalcInput, type WelfareCalcResult } from './welfareCalc'
+export { calcClaim, type ClaimCalcInput, type ClaimCalcResult, type ClaimItemInput, type ClaimItemResult } from './claimCalc'
 export { convertJeonseToMonthly } from './lodgingCalc'

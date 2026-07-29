@@ -13,14 +13,24 @@ export default async function SiteDetailPage({ params }: Props) {
   const { siteId } = await params
   const supabase = await createClient()
 
-  const { data: site } = await supabase
-    .from('sites')
-    .select('*')
-    .eq('id', siteId)
-    .is('deleted_at', null)
-    .single()
+  const [{ data: site }, { data: budgetRows }] = await Promise.all([
+    supabase
+      .from('sites')
+      .select('*')
+      .eq('id', siteId)
+      .is('deleted_at', null)
+      .single(),
+    supabase
+      .from('site_expense_budgets')
+      .select('category, amount')
+      .eq('site_id', siteId),
+  ])
 
   if (!site) notFound()
+
+  const budgets = Object.fromEntries(
+    (budgetRows ?? []).map((b) => [b.category, b.amount]),
+  )
 
   const action = updateSite.bind(null, siteId)
 
@@ -38,7 +48,7 @@ export default async function SiteDetailPage({ params }: Props) {
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <SiteForm site={site} action={action} />
+        <SiteForm site={site} budgets={budgets} action={action} />
       </div>
     </div>
   )

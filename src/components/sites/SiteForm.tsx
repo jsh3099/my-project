@@ -1,14 +1,17 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
+import { EXPENSE_CATEGORY_LABELS, type ExpenseCategory } from '@/lib/constants'
 import type { Site } from '@/types'
 
 interface SiteFormProps {
   site?: Site
+  /** 항목별 계상금액 (site_expense_budgets) — category → amount */
+  budgets?: Partial<Record<ExpenseCategory, number>>
   action: (formData: FormData) => Promise<{ error: string } | void>
 }
 
@@ -18,9 +21,32 @@ const statusOptions = [
   { value: 'suspended', label: '중단' },
 ]
 
-export function SiteForm({ site, action }: SiteFormProps) {
+const BUDGET_CATEGORIES = Object.entries(EXPENSE_CATEGORY_LABELS) as [ExpenseCategory, string][]
+
+function formatKRW(n: number) {
+  return n.toLocaleString('ko-KR') + '원'
+}
+
+export function SiteForm({ site, budgets, action }: SiteFormProps) {
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const [totalInput, setTotalInput] = useState(
+    site?.direct_expense_budget ? String(site.direct_expense_budget) : '',
+  )
+  const [budgetInputs, setBudgetInputs] = useState<Record<ExpenseCategory, string>>(() => {
+    const init = {} as Record<ExpenseCategory, string>
+    for (const [key] of BUDGET_CATEGORIES) {
+      const v = budgets?.[key]
+      init[key] = v && v > 0 ? String(v) : ''
+    }
+    return init
+  })
+
+  const budgetSum = useMemo(
+    () => BUDGET_CATEGORIES.reduce((s, [key]) => s + (parseInt(budgetInputs[key], 10) || 0), 0),
+    [budgetInputs],
+  )
+  const hasItemBudgets = budgetSum > 0
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -78,26 +104,58 @@ export function SiteForm({ site, action }: SiteFormProps) {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Input
-          label="계약금액 (원)"
-          name="contract_amount"
-          type="number"
-          required
-          defaultValue={site?.contract_amount}
-          placeholder="0"
-          min={1}
-        />
-        <Input
-          label="직접경비 예산 (원)"
-          name="direct_expense_budget"
-          type="number"
-          required
-          defaultValue={site?.direct_expense_budget}
-          placeholder="0"
-          min={1}
-        />
-      </div>
+      <Input
+        label="계약금액 (원)"
+        name="contract_amount"
+        type="number"
+        required
+        defaultValue={site?.contract_amount}
+        placeholder="0"
+        min={1}
+      />
+
+      {/* 항목별 직접경비 계상금액 — 내역서(산출내역서)의 직접경비 항목별 금액 */}
+      <fieldset className="rounded-lg border border-gray-200 p-4">
+        <legend className="px-1 text-sm font-medium text-gray-700">
+          직접경비 계상금액 (항목별)
+        </legend>
+        <p className="mb-3 text-xs text-gray-500">
+          계약 내역서상 직접경비 항목별 계상금액입니다 (예: 주재비=상주인건비의 10%, 출장비=기술지원인건비의 5%).
+          해당 없는 항목은 비워두세요.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          {BUDGET_CATEGORIES.map(([key, label]) => (
+            <Input
+              key={key}
+              label={label}
+              name={`budget_${key}`}
+              type="number"
+              min={0}
+              placeholder="0"
+              value={budgetInputs[key]}
+              onChange={(e) =>
+                setBudgetInputs((prev) => ({ ...prev, [key]: e.target.value }))
+              }
+            />
+          ))}
+        </div>
+        <p className="mt-3 text-sm text-gray-600">
+          항목 합계: <span className="font-semibold text-gray-900">{formatKRW(budgetSum)}</span>
+          {hasItemBudgets && ' — 저장 시 직접경비 예산(총액)이 이 합계로 설정됩니다.'}
+        </p>
+      </fieldset>
+
+      <Input
+        label="직접경비 예산 · 계상총액 (원)"
+        name="direct_expense_budget"
+        type="number"
+        required
+        placeholder="0"
+        min={1}
+        readOnly={hasItemBudgets}
+        value={hasItemBudgets ? String(budgetSum) : totalInput}
+        onChange={(e) => setTotalInput(e.target.value)}
+      />
 
       <Select
         label="현장 상태"

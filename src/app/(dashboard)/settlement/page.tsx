@@ -42,10 +42,8 @@ export default async function StaffSettlementPage({
   const rounds = (roundsData ?? []) as SettlementRound[]
   const openRound = rounds.find((r) => r.status === 'open') ?? null
   const confirmedRounds = rounds.filter((r) => r.status === 'confirmed')
-  const latestConfirmed = confirmedRounds[confirmedRounds.length - 1] ?? null
-  const priorCumulative = latestConfirmed
-    ? latestConfirmed.prior_cumulative_amount + latestConfirmed.current_round_amount
-    : 0
+  // 누계는 청구(기성)액 기준 — 잔액 초과 사용분(미지급)은 누계에 포함하지 않는다
+  const priorCumulative = confirmedRounds.reduce((s, r) => s + r.claim_amount, 0)
 
   // 진행 중인 회차의 잠정 사용액 (현장 전체 인원 합계 — admin client로 본인 제출건 외에도 조회)
   let previewTotal = 0
@@ -103,13 +101,13 @@ export default async function StaffSettlementPage({
             </thead>
             <tbody className="divide-y divide-gray-100">
               {confirmedRounds.map((r) => {
-                const remaining = site.direct_expense_budget - (r.prior_cumulative_amount + r.current_round_amount)
+                const remaining = site.direct_expense_budget - (r.prior_cumulative_amount + r.claim_amount)
                 return (
                   <tr key={r.id}>
                     <td className="px-4 py-3 font-medium text-gray-900">{r.round_no}회차</td>
                     <td className="px-4 py-3 text-gray-600">{r.period_start} ~ {r.period_end}</td>
                     <td className="px-4 py-3 text-right text-gray-600">{formatKRW(r.prior_cumulative_amount)}</td>
-                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatKRW(r.current_round_amount)}</td>
+                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatKRW(r.claim_amount)}</td>
                     <td className={`px-4 py-3 text-right font-medium ${remaining < 0 ? 'text-red-600' : 'text-blue-600'}`}>
                       {formatKRW(remaining)}
                     </td>

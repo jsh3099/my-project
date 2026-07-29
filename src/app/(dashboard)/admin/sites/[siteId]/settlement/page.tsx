@@ -7,11 +7,15 @@ import { SettlementRoundForm } from '@/components/sites/SettlementRoundForm'
 import { ConfirmRoundButton } from '@/components/sites/ConfirmRoundButton'
 import { ReportDownloadButton } from '@/components/settlement/ReportDownloadButton'
 import { buildCategorySummaryTree } from '@/lib/expenseSummaryTree'
-import type { SettlementRound } from '@/types'
+import { calcClaim } from '@/lib/settlement'
+import { EXPENSE_CATEGORY_LABELS, type ExpenseCategory } from '@/lib/constants'
+import type { SettlementRound, SettlementRoundItem } from '@/types'
 
 interface Props {
   params: Promise<{ siteId: string }>
 }
+
+const CATEGORY_KEYS = Object.keys(EXPENSE_CATEGORY_LABELS) as ExpenseCategory[]
 
 function formatKRW(n: number) {
   return n.toLocaleString('ko-KR') + '원'
@@ -27,7 +31,7 @@ export default async function SettlementRoundsPage({ params }: Props) {
   const { siteId } = await params
   const supabase = await createClient()
 
-  const [{ data: site }, { data: rounds }] = await Promise.all([
+  const [{ data: site }, { data: rounds }, { data: budgetRows }] = await Promise.all([
     supabase
       .from('sites')
       .select('id, name, contract_start, contract_end, direct_expense_budget')
@@ -39,6 +43,10 @@ export default async function SettlementRoundsPage({ params }: Props) {
       .select('*')
       .eq('site_id', siteId)
       .order('round_no', { ascending: true }),
+    supabase
+      .from('site_expense_budgets')
+      .select('category, amount')
+      .eq('site_id', siteId),
   ])
 
   if (!site) notFound()
@@ -46,14 +54,29 @@ export default async function SettlementRoundsPage({ params }: Props) {
   const allRounds = (rounds ?? []) as SettlementRound[]
   const openRound = allRounds.find((r) => r.status === 'open') ?? null
   const confirmedRounds = allRounds.filter((r) => r.status === 'confirmed')
-  const latestConfirmed = confirmedRounds[confirmedRounds.length - 1] ?? null
-  const priorCumulative = latestConfirmed
-    ? latestConfirmed.prior_cumulative_amount + latestConfirmed.current_round_amount
-    : 0
+
+  // 항목별 계상금액 (미입력 항목은 0)
+  const budgetByCategory = new Map<string, number>(
+    (budgetRows ?? []).map((b) => [b.category, b.amount]),
+  )
+  const hasItemBudgets = [...budgetByCategory.values()].some((v) => v > 0)
+
+  // 전회 누계 청구액 (총액 + 항목별) — 확정 회차 스냅샷 기준
+  const priorClaimTotal = confirmedRounds.reduce((s, r) => s + r.claim_amount, 0)
+  const priorClaimByCategory = new Map<string, number>()
+  if (confirmedRounds.length > 0) {
+    const { data: itemRows } = await supabase
+      .from('settlement_round_items')
+      .select('category, claim_amount')
+      .in('round_id', confirmedRounds.map((r) => r.id))
+    for (const row of (itemRows ?? []) as Pick<SettlementRoundItem, 'category' | 'claim_amount'>[]) {
+      priorClaimByCategory.set(row.category, (priorClaimByCategory.get(row.category) ?? 0) + row.claim_amount)
+    }
+  }
 
   // 진행 중인 회차의 잠정 사용액 미리보기 (제출됨 + 아직 어느 회차에도 속하지 않은 건)
   let previewTree: ReturnType<typeof buildCategorySummaryTree> = []
-  let previewTotal = 0
+  let usedByCategory = new Map<string, number>()
   if (openRound) {
     const { data: previewExpenses } = await supabase
       .from('expenses')
@@ -70,12 +93,29 @@ export default async function SettlementRoundsPage({ params }: Props) {
       subcategory: e.subcategory,
       amount: e.amount - e.over_limit_amount,
     }))
-    previewTotal = entries.reduce((s, e) => s + e.amount, 0)
     previewTree = buildCategorySummaryTree(entries)
+    usedByCategory = entries.reduce((m, e) => {
+      m.set(e.category, (m.get(e.category) ?? 0) + e.amount)
+      return m
+    }, new Map<string, number>())
   }
 
-  const previewRemaining = site.direct_expense_budget - priorCumulative - previewTotal
+  // 청구액 산정: 청구 = min(사용액, 계상총액 잔액), 항목 초과는 총액 내 흡수
+  const claim = calcClaim({
+    totalBudget: site.direct_expense_budget,
+    priorClaimTotal,
+    items: CATEGORY_KEYS.map((category) => ({
+      category,
+      contractAmount: budgetByCategory.get(category) ?? 0,
+      priorCumulative: priorClaimByCategory.get(category) ?? 0,
+      usedAmount: usedByCategory.get(category) ?? 0,
+    })),
+  })
+  const budgetRemainAfter = site.direct_expense_budget - priorClaimTotal - claim.claimTotal
   const isFinalRound = openRound ? openRound.period_end >= site.contract_end : false
+  const budgetShortfall = openRound?.budgeted_amount
+    ? openRound.budgeted_amount - claim.usedTotal
+    : 0
 
   const lastRound = allRounds[allRounds.length - 1] ?? null
   const nextRoundNo = (lastRound?.round_no ?? 0) + 1
@@ -83,7 +123,7 @@ export default async function SettlementRoundsPage({ params }: Props) {
   const createAction = createSettlementRound.bind(null, siteId)
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       <div>
         <Link href="/admin/sites" className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900">
           <ChevronLeft className="h-4 w-4" />
@@ -91,8 +131,17 @@ export default async function SettlementRoundsPage({ params }: Props) {
         </Link>
         <h2 className="mt-3 text-xl font-semibold text-gray-900">기성회차 정산 — {site.name}</h2>
         <p className="mt-1 text-sm text-gray-500">
-          직접경비 계상금액 {formatKRW(site.direct_expense_budget)} · 계약기간 {site.contract_start} ~ {site.contract_end}
+          직접경비 계상총액 {formatKRW(site.direct_expense_budget)} · 계약기간 {site.contract_start} ~ {site.contract_end}
         </p>
+        {!hasItemBudgets && (
+          <p className="mt-2 rounded-md bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
+            항목별 계상금액이 아직 입력되지 않았습니다.{' '}
+            <Link href={`/admin/sites/${siteId}`} className="font-medium underline">
+              현장 수정
+            </Link>
+            에서 주재비·출장비·도서인쇄비 등 항목별 계상금액을 입력하면 정산서 2번 표(계약금액/잔액)가 채워집니다.
+          </p>
+        )}
       </div>
 
       {/* 확정된 회차 이력 */}
@@ -103,21 +152,29 @@ export default async function SettlementRoundsPage({ params }: Props) {
               <tr>
                 <th className="px-4 py-2 text-left font-medium text-gray-500">회차</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-500">정산기간</th>
-                <th className="px-4 py-2 text-right font-medium text-gray-500">전회기성</th>
-                <th className="px-4 py-2 text-right font-medium text-gray-500">금회기성</th>
+                <th className="px-4 py-2 text-right font-medium text-gray-500">전회누계(기성)</th>
+                <th className="px-4 py-2 text-right font-medium text-gray-500">금회사용</th>
+                <th className="px-4 py-2 text-right font-medium text-gray-500">금회기성(청구)</th>
                 <th className="px-4 py-2 text-right font-medium text-gray-500">잔액</th>
                 <th className="px-4 py-2 text-center font-medium text-gray-500">정산서</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {confirmedRounds.map((r) => {
-                const remaining = site.direct_expense_budget - (r.prior_cumulative_amount + r.current_round_amount)
+                const remaining = site.direct_expense_budget - (r.prior_cumulative_amount + r.claim_amount)
+                const unpaid = r.current_round_amount - r.claim_amount
                 return (
                   <tr key={r.id}>
                     <td className="px-4 py-3 font-medium text-gray-900">{r.round_no}회차</td>
                     <td className="px-4 py-3 text-gray-600">{r.period_start} ~ {r.period_end}</td>
                     <td className="px-4 py-3 text-right text-gray-600">{formatKRW(r.prior_cumulative_amount)}</td>
-                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatKRW(r.current_round_amount)}</td>
+                    <td className="px-4 py-3 text-right text-gray-600">
+                      {formatKRW(r.current_round_amount)}
+                      {unpaid > 0 && (
+                        <span className="block text-xs text-red-500">미지급 {formatKRW(unpaid)}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium text-gray-900">{formatKRW(r.claim_amount)}</td>
                     <td className={`px-4 py-3 text-right font-medium ${remaining < 0 ? 'text-red-600' : 'text-blue-600'}`}>
                       {formatKRW(remaining)}
                     </td>
@@ -129,15 +186,15 @@ export default async function SettlementRoundsPage({ params }: Props) {
               })}
             </tbody>
           </table>
-          {latestConfirmed && latestConfirmed.period_end >= site.contract_end && previewRemaining > 0 && (
+          {confirmedRounds[confirmedRounds.length - 1].period_end >= site.contract_end && budgetRemainAfter > 0 && (
             <div className="border-t border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              ⚠ 계약기간이 종료된 이후에도 잔액이 {formatKRW(previewRemaining)} 남아있습니다 — 삭감 대상인지 확인이 필요합니다.
+              ⚠ 계약기간이 종료된 이후에도 잔액이 {formatKRW(budgetRemainAfter)} 남아있습니다 — 삭감 대상인지 확인이 필요합니다.
             </div>
           )}
         </div>
       )}
 
-      {/* 진행 중인 회차: 미리보기 + 확정 */}
+      {/* 진행 중인 회차: 계상 대비 청구 미리보기 + 확정 */}
       {openRound && (
         <div className="rounded-lg border border-blue-200 bg-white p-6 space-y-4">
           <div className="flex items-center justify-between">
@@ -147,6 +204,49 @@ export default async function SettlementRoundsPage({ params }: Props) {
             <ReportDownloadButton siteId={siteId} roundId={openRound.id} label="📄 잠정 정산서 엑셀" />
           </div>
 
+          {/* 항목별 계상 대비 사용·청구 (정산서 2번 표 미리보기) */}
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-xs text-gray-500">
+                  <th className="py-2 text-left font-medium">항목</th>
+                  <th className="py-2 text-right font-medium">계약금액(계상)</th>
+                  <th className="py-2 text-right font-medium">전회누계</th>
+                  <th className="py-2 text-right font-medium">금회사용</th>
+                  <th className="py-2 text-right font-medium">금회기성(잠정)</th>
+                  <th className="py-2 text-right font-medium">잔액</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {claim.items
+                  .filter((i) => i.contractAmount > 0 || i.priorCumulative > 0 || i.usedAmount > 0)
+                  .map((i) => (
+                    <tr key={i.category}>
+                      <td className="py-2 text-gray-700">{EXPENSE_CATEGORY_LABELS[i.category as ExpenseCategory]}</td>
+                      <td className="py-2 text-right text-gray-600">{i.contractAmount > 0 ? formatKRW(i.contractAmount) : '-'}</td>
+                      <td className="py-2 text-right text-gray-600">{formatKRW(i.priorCumulative)}</td>
+                      <td className="py-2 text-right text-gray-600">{formatKRW(i.usedAmount)}</td>
+                      <td className="py-2 text-right font-medium text-gray-900">{formatKRW(i.claimAmount)}</td>
+                      <td className={`py-2 text-right ${i.contractAmount > 0 && i.remaining < 0 ? 'text-orange-600 font-medium' : 'text-gray-600'}`}>
+                        {i.contractAmount > 0 ? formatKRW(i.remaining) : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                <tr className="border-t border-gray-300 font-semibold">
+                  <td className="py-2 text-gray-900">합계</td>
+                  <td className="py-2 text-right text-gray-900">{formatKRW(site.direct_expense_budget)}</td>
+                  <td className="py-2 text-right text-gray-900">{formatKRW(priorClaimTotal)}</td>
+                  <td className="py-2 text-right text-gray-900">{formatKRW(claim.usedTotal)}</td>
+                  <td className="py-2 text-right text-blue-700">{formatKRW(claim.claimTotal)}</td>
+                  <td className={`py-2 text-right ${budgetRemainAfter < 0 ? 'text-red-600' : 'text-blue-700'}`}>
+                    {formatKRW(budgetRemainAfter)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* 세부 사용내역 트리 */}
           <div className="space-y-2 text-sm">
             {previewTree.map((cat) => (
               <div key={cat.category}>
@@ -185,26 +285,37 @@ export default async function SettlementRoundsPage({ params }: Props) {
             )}
           </div>
 
-          <div className="border-t pt-3 space-y-1 text-sm">
-            <div className="flex justify-between text-gray-600">
-              <span>전회기성금액</span>
-              <span>{formatKRW(priorCumulative)}</span>
+          {/* 경고: 잔액 초과 사용 → 미지급 */}
+          {claim.unpaidAmount > 0 && (
+            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+              ⚠ 사용액 {formatKRW(claim.usedTotal)} 중 계상 잔액({formatKRW(claim.remainingBudget)})을 초과한{' '}
+              <span className="font-semibold">{formatKRW(claim.unpaidAmount)}은 발주청에 청구할 수 없습니다</span> —
+              금회 기성 청구액은 {formatKRW(claim.claimTotal)}로 제한됩니다.
             </div>
-            <div className="flex justify-between font-semibold text-gray-900">
-              <span>금회기성금액 (잠정)</span>
-              <span>{formatKRW(previewTotal)}</span>
-            </div>
-            <div className="flex justify-between font-semibold text-blue-700">
-              <span>잔액 (잠정)</span>
-              <span>{formatKRW(previewRemaining)}</span>
-            </div>
-          </div>
+          )}
 
-          {previewRemaining > 0 && (
-            <div className={`rounded-lg border p-3 text-sm ${isFinalRound ? 'border-red-300 bg-red-50 text-red-700' : 'border-yellow-300 bg-yellow-50 text-yellow-700'}`}>
-              ⚠ 잔액이 {formatKRW(previewRemaining)} 남아있습니다 — 계약기간 내 직접경비 예산을 다 사용하지 못하면
+          {/* 경고: 항목별 초과 (총액 내 흡수) */}
+          {claim.unpaidAmount === 0 &&
+            claim.items.some((i) => i.contractAmount > 0 && i.remaining < 0) && (
+              <div className="rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm text-orange-700">
+                일부 항목이 항목별 계상금액을 초과했지만, 직접경비 총액 내이므로 타 항목 잔액에서 흡수 가능합니다
+                (국토교통부 고시 제2023-580호 별표2 — 항목별 비용은 직접경비 내에서 변경 가능).
+              </div>
+            )}
+
+          {/* 경고: 금회 계상액 대비 부족 → 삭감 위험 */}
+          {budgetShortfall > 0 && (
+            <div className="rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-700">
+              금회 계상금액 {formatKRW(openRound.budgeted_amount!)} 대비 사용액이{' '}
+              {formatKRW(budgetShortfall)} 부족합니다 — 증빙으로 채우지 못한 계상분은 발주청이 삭감 후 지급합니다.
+            </div>
+          )}
+
+          {/* 경고: 계약 종료 임박 잔액 */}
+          {budgetRemainAfter > 0 && isFinalRound && (
+            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+              ⚠ 이번 회차 기간이 계약 종료일을 포함하는데 잔액이 {formatKRW(budgetRemainAfter)} 남아있습니다 —
               미사용분만큼 용역비가 삭감되고 실제 사용한 금액만 지급됩니다.
-              {isFinalRound && ' 이번 회차 기간이 계약 종료일을 포함하므로 특히 주의가 필요합니다.'}
             </div>
           )}
 

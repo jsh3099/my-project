@@ -13,6 +13,7 @@ export async function createSettlementRound(siteId: string, formData: FormData) 
     site_id: siteId,
     period_start: formData.get('period_start'),
     period_end: formData.get('period_end'),
+    budgeted_amount: (formData.get('budgeted_amount') as string | null) || null,
   })
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
@@ -40,6 +41,7 @@ export async function createSettlementRound(siteId: string, formData: FormData) 
     round_no: roundNo,
     period_start: parsed.data.period_start,
     period_end: parsed.data.period_end,
+    budgeted_amount: parsed.data.budgeted_amount ?? null,
     created_by: user.id,
   })
 
