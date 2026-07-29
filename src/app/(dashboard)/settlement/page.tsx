@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { ReportDownloadButton } from '@/components/settlement/ReportDownloadButton'
+import { SiteBudgetForm } from '@/components/settlement/SiteBudgetForm'
+import { updateSiteExpenseBudgets } from '@/actions/siteBudgets'
 import { calcClaim } from '@/lib/settlement'
 import { EXPENSE_CATEGORY_LABELS, type ExpenseCategory } from '@/lib/constants'
 import type { Site, SettlementRound, SettlementRoundItem } from '@/types'
@@ -130,6 +132,13 @@ export default async function StaffSettlementPage({
           </div>
         </form>
       )}
+
+      {/* 항목별 계상금액 입력 — 내역서의 계상금액을 기재해야 사용액·잔액 추적이 시작된다 */}
+      <SiteBudgetForm
+        siteId={siteId}
+        budgets={Object.fromEntries(budgetByCategory) as Partial<Record<ExpenseCategory, number>>}
+        action={updateSiteExpenseBudgets.bind(null, siteId)}
+      />
 
       {/* 항목별 계상 대비 현황 (읽기 전용) */}
       {showStatusTable && (
