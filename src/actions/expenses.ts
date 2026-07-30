@@ -156,12 +156,13 @@ export async function deleteExpense(id: string) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: '로그인이 필요합니다.' }
 
+  // 반려된 건은 사유 확인 후 삭제하고 다시 입력하는 것이 수정 흐름이다
   const { error } = await supabase
     .from('expenses')
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', id)
     .eq('user_id', user.id)
-    .eq('status', 'draft')
+    .in('status', ['draft', 'rejected'])
 
   if (error) return { error: error.message }
   return { success: true }

@@ -81,7 +81,7 @@ export default async function DashboardPage() {
         .select('category, amount, over_limit_amount')
         .in('site_id', siteIds)
         .is('settlement_round_id', null)
-        .in('status', ['draft', 'submitted'])
+        .in('status', ['draft', 'submitted', 'approved'])
         .is('deleted_at', null),
     ])
 

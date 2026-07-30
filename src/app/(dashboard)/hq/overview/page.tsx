@@ -63,10 +63,14 @@ export default async function HqOverviewPage() {
           <p className="text-xs font-medium text-gray-500">확정 누적 사용액</p>
           <p className="mt-2 text-xl font-bold text-gray-900">{formatKRW(totalApproved)}</p>
         </div>
-        <div className={`rounded-xl border p-5 ${totalPendingReview > 0 ? 'border-yellow-200 bg-yellow-50' : 'border-gray-200 bg-white'}`}>
+        <Link
+          href="/hq/review"
+          className={`rounded-xl border p-5 transition hover:shadow-sm ${totalPendingReview > 0 ? 'border-yellow-200 bg-yellow-50' : 'border-gray-200 bg-white'}`}
+        >
           <p className="text-xs font-medium text-gray-500">본사 검토 대기</p>
           <p className={`mt-2 text-xl font-bold ${totalPendingReview > 0 ? 'text-yellow-600' : 'text-gray-900'}`}>{totalPendingReview}건</p>
-        </div>
+          <p className="mt-1 text-xs text-blue-600">제출 검토 화면으로 →</p>
+        </Link>
       </div>
 
       {sites.length === 0 ? (
@@ -102,7 +106,9 @@ export default async function HqOverviewPage() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       {stats.submitted > 0 ? (
-                        <span className="font-semibold text-yellow-600">{stats.submitted}건</span>
+                        <Link href="/hq/review" className="font-semibold text-yellow-600 hover:underline">
+                          {stats.submitted}건
+                        </Link>
                       ) : (
                         <span className="text-gray-400">-</span>
                       )}

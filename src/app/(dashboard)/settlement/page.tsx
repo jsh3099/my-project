@@ -83,7 +83,7 @@ export default async function StaffSettlementPage({
       .from('expenses')
       .select('category, amount, over_limit_amount')
       .eq('site_id', siteId)
-      .eq('status', 'submitted')
+      .in('status', ['submitted', 'approved'])
       .is('settlement_round_id', null)
       .is('deleted_at', null)
       .gte('expense_date', openRound.period_start)

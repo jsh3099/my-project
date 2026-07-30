@@ -190,14 +190,14 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft }: Props) {
                       </div>
                     </div>
                   )}
-                  {expense.status === 'draft' && (
+                  {(expense.status === 'draft' || expense.status === 'rejected') && (
                     <button
                       onClick={() => handleDelete(expense.id)}
                       disabled={isPending}
                       className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                      삭제
+                      {expense.status === 'rejected' ? '삭제 후 재입력' : '삭제'}
                     </button>
                   )}
                 </div>

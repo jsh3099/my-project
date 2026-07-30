@@ -41,8 +41,8 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
-  // /admin/* 경로는 system_admin만 접근 가능
-  if (user && pathname.startsWith('/admin')) {
+  // /admin/*, /hq/* 경로는 본사 담당자·관리자만 접근 가능
+  if (user && (pathname.startsWith('/admin') || pathname.startsWith('/hq'))) {
     const { data: profile } = await supabase
       .from('profiles')
       .select('role')

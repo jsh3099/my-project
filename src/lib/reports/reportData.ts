@@ -65,7 +65,7 @@ export async function getSettlementReportData(
     query = query.eq('settlement_round_id', round.id)
   } else {
     // 잠정: 아직 회차에 편입되지 않은 지출 (기간이 있으면 기간 필터)
-    query = query.is('settlement_round_id', null).in('status', ['draft', 'submitted'])
+    query = query.is('settlement_round_id', null).in('status', ['draft', 'submitted', 'approved'])
     if (round) {
       query = query.gte('expense_date', round.period_start).lte('expense_date', round.period_end)
     }

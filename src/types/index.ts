@@ -98,6 +98,8 @@ export type Expense = {
   memo: string | null
   status: 'draft' | 'submitted' | 'approved' | 'rejected'
   rejection_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
   is_over_limit: boolean
   over_limit_amount: number
   receipt_urls: string[]
