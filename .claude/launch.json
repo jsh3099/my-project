@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "jsh3099-my-project",
-      "runtimeExecutable": "C:\\Users\\user\\Desktop\\2026.7.21my-project\\.claude\\dev-wrapper.cmd",
+      "runtimeExecutable": "C:\\claude\\jsh3099-my-project\\.claude\\dev-wrapper.cmd",
       "runtimeArgs": [],
       "port": 3001,
       "autoPort": true

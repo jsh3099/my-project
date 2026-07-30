@@ -54,7 +54,7 @@ export function Sidebar({ role, userName }: SidebarProps) {
   return (
     <aside className="flex h-screen w-60 flex-col border-r border-gray-200 bg-white">
       <div className="flex h-16 items-center border-b border-gray-200 px-6">
-        <span className="text-base font-bold text-blue-700">CM 정산 플랫폼</span>
+        <span className="text-base font-bold text-blue-700">CM 직접경비 정산 플랫폼</span>
       </div>
 
       <nav className="flex-1 space-y-1 px-3 py-4">

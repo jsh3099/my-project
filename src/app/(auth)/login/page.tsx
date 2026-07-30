@@ -24,7 +24,7 @@ export default function LoginPage() {
   return (
     <div className="w-full max-w-sm space-y-6 rounded-xl bg-white p-8 shadow-md">
       <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900">CM 정산 플랫폼</h1>
+        <h1 className="text-2xl font-bold text-gray-900">CM 직접경비 정산 플랫폼</h1>
         <p className="mt-1 text-sm text-gray-500">선엔지니어링 건설사업관리본부</p>
       </div>
 

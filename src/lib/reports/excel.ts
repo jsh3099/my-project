@@ -64,7 +64,7 @@ function setupSheet(wb: ExcelJS.Workbook, name: string, orientation: 'portrait' 
 
 export function buildSettlementWorkbook(data: SettlementReportData): ExcelJS.Workbook {
   const wb = new ExcelJS.Workbook()
-  wb.creator = 'CM 정산 플랫폼'
+  wb.creator = 'CM 직접경비 정산 플랫폼'
 
   // 세부 섹션 번호 부여 (총괄 3번 표 비고 열과 세부 시트 제목에 공통 사용)
   const sectionNo = buildSectionNumbers(data)
