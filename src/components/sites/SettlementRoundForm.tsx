@@ -45,8 +45,8 @@ export function SettlementRoundForm({ nextRoundNo, defaultPeriodStart, action }:
           placeholder="예: 40,667,853 — 산출내역서상 이번 회차 직접경비"
         />
         <p className="mt-1 text-xs text-gray-500">
-          이번 회차 산출내역서의 직접경비 계상액(주재비=상주인건비×10% 등)을 입력하면
-          사용액과 비교해 부족·초과를 경고합니다.
+          이번 회차 산출내역서의 직접경비 계상액을 그대로 입력하면
+          사용액과 비교해 부족·초과를 경고합니다. (시스템이 산출하지 않음 — 직접 입력)
         </p>
       </div>
       <div className="flex justify-end">

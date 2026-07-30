@@ -120,8 +120,8 @@ export function SiteForm({ site, budgets, action }: SiteFormProps) {
           직접경비 계상금액 (항목별)
         </legend>
         <p className="mb-3 text-xs text-gray-500">
-          계약 내역서상 직접경비 항목별 계상금액입니다 (예: 주재비=상주인건비의 10%, 출장비=기술지원인건비의 5%).
-          해당 없는 항목은 비워두세요.
+          계약 내역서상 직접경비 항목별 계상금액을 그대로 입력하세요.
+          해당 없는 항목은 비워두세요. (배치표 기반 산출은 시스템이 계산하지 않습니다)
         </p>
         <div className="grid grid-cols-2 gap-4">
           {BUDGET_CATEGORIES.map(([key, label]) => (

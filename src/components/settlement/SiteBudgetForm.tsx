@@ -80,8 +80,8 @@ export function SiteBudgetForm({ siteId, budgets, action }: Props) {
       {open && (
         <form onSubmit={handleSubmit} className="space-y-4 border-t border-gray-100 px-6 py-4">
           <p className="text-xs text-gray-500">
-            계약 내역서(산출내역서)의 직접경비 항목별 계상금액을 기재하세요
-            (예: 주재비=상주인건비의 10%, 출장비=기술지원인건비의 5%). 해당 없는 항목은 비워두면 됩니다.
+            계약 내역서(산출내역서)의 직접경비 항목별 계상금액을 그대로 기재하세요.
+            해당 없는 항목은 비워두면 됩니다. (배치표 기반 산출은 시스템이 계산하지 않습니다 — 내역서 금액을 직접 입력)
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {BUDGET_CATEGORIES.map(([key, label]) => (
