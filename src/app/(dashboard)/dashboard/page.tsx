@@ -185,24 +185,25 @@ export default async function DashboardPage() {
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
               <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-gray-700">
                 <Wallet className="h-4 w-4 text-blue-500" />
-                항목별 계상 잔액
+                항목별 계상 채움 현황
               </h2>
               <p className="mb-4 text-xs text-gray-400">
-                계약 전체 기준 — 확정 기성 + 미편입 입력분(현장 전체) 합산. 잔액이 남으면 삭감될 수 있습니다.
+                계약 전체 기준 — 확정 기성 + 미편입 입력분(현장 전체) 합산.
+                직접경비는 증빙으로 채운 만큼만 지급되므로, 미충당분은 삭감 대상입니다.
               </p>
               <div className="space-y-3">
                 {budgetStatus.map((b) => {
-                  const over = b.remaining < 0
+                  const filled = b.remaining <= 0
                   const barPct = Math.min(100, Math.max(0, b.pct))
-                  const barColor = over ? 'bg-red-500' : b.pct >= 80 ? 'bg-yellow-500' : 'bg-blue-500'
+                  const barColor = filled ? 'bg-blue-600' : 'bg-blue-400'
                   return (
                     <div key={b.category}>
                       <div className="mb-1 flex justify-between text-xs text-gray-600">
                         <span>{EXPENSE_CATEGORY_LABELS[b.category as ExpenseCategory] ?? b.category}</span>
                         <span className="font-medium">
                           {formatKRW(b.usedCum)} / {formatKRW(b.budget)} ({b.pct}%)
-                          <span className={`ml-2 ${over ? 'text-red-500' : 'text-gray-400'}`}>
-                            {over ? `초과 ${formatKRW(-b.remaining)}` : `잔액 ${formatKRW(b.remaining)}`}
+                          <span className={`ml-2 font-semibold ${filled ? 'text-blue-600' : 'text-red-500'}`}>
+                            {filled ? `충족 ✓${b.remaining < 0 ? ` (초과 ${formatKRW(-b.remaining)} 총액 내 흡수)` : ''}` : `미충당 ${formatKRW(b.remaining)}`}
                           </span>
                         </span>
                       </div>

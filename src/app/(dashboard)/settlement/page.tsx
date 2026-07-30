@@ -153,37 +153,58 @@ export default async function StaffSettlementPage({
                   <th className="py-2 text-right font-medium">누계기성</th>
                   {openRound && <th className="py-2 text-right font-medium">금회사용</th>}
                   {openRound && <th className="py-2 text-right font-medium">금회기성(잠정)</th>}
-                  <th className="py-2 text-right font-medium">잔액</th>
+                  <th className="py-2 text-right font-medium">잔액(미충당)</th>
+                  <th className="py-2 text-right font-medium">채움률</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {claim.items
                   .filter((i) => i.contractAmount > 0 || i.priorCumulative > 0 || i.usedAmount > 0)
-                  .map((i) => (
-                    <tr key={i.category}>
-                      <td className="py-2 text-gray-700">{EXPENSE_CATEGORY_LABELS[i.category as ExpenseCategory]}</td>
-                      <td className="py-2 text-right text-gray-600">{i.contractAmount > 0 ? formatKRW(i.contractAmount) : '-'}</td>
-                      <td className="py-2 text-right text-gray-600">{formatKRW(i.priorCumulative)}</td>
-                      {openRound && <td className="py-2 text-right text-gray-600">{formatKRW(i.usedAmount)}</td>}
-                      {openRound && <td className="py-2 text-right font-medium text-gray-900">{formatKRW(i.claimAmount)}</td>}
-                      <td className={`py-2 text-right ${i.contractAmount > 0 && i.remaining < 0 ? 'text-orange-600 font-medium' : 'text-gray-600'}`}>
-                        {i.contractAmount > 0 ? formatKRW(i.remaining) : '-'}
-                      </td>
-                    </tr>
-                  ))}
+                  .map((i) => {
+                    const fillPct = i.contractAmount > 0
+                      ? Math.round(((i.contractAmount - i.remaining) / i.contractAmount) * 100)
+                      : null
+                    const filled = i.contractAmount > 0 && i.remaining <= 0
+                    return (
+                      <tr key={i.category}>
+                        <td className="py-2 text-gray-700">{EXPENSE_CATEGORY_LABELS[i.category as ExpenseCategory]}</td>
+                        <td className="py-2 text-right text-gray-600">{i.contractAmount > 0 ? formatKRW(i.contractAmount) : '-'}</td>
+                        <td className="py-2 text-right text-gray-600">{formatKRW(i.priorCumulative)}</td>
+                        {openRound && <td className="py-2 text-right text-gray-600">{formatKRW(i.usedAmount)}</td>}
+                        {openRound && <td className="py-2 text-right font-medium text-gray-900">{formatKRW(i.claimAmount)}</td>}
+                        <td className={`py-2 text-right font-medium ${i.contractAmount <= 0 ? 'text-gray-600' : filled ? 'text-blue-600' : 'text-red-600'}`}>
+                          {i.contractAmount > 0 ? formatKRW(i.remaining) : '-'}
+                        </td>
+                        <td className={`py-2 text-right ${fillPct === null ? 'text-gray-400' : filled ? 'text-blue-600 font-semibold' : 'text-red-600'}`}>
+                          {fillPct === null ? '-' : filled ? `충족 (${fillPct}%)` : `${fillPct}%`}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 <tr className="border-t border-gray-300 font-semibold">
                   <td className="py-2 text-gray-900">합계</td>
                   <td className="py-2 text-right text-gray-900">{formatKRW(site.direct_expense_budget)}</td>
                   <td className="py-2 text-right text-gray-900">{formatKRW(priorCumulative)}</td>
                   {openRound && <td className="py-2 text-right text-gray-900">{formatKRW(claim.usedTotal)}</td>}
                   {openRound && <td className="py-2 text-right text-blue-700">{formatKRW(claim.claimTotal)}</td>}
-                  <td className={`py-2 text-right ${budgetRemainAfter < 0 ? 'text-red-600' : 'text-blue-700'}`}>
+                  <td className={`py-2 text-right ${budgetRemainAfter > 0 ? 'text-red-600' : 'text-blue-700'}`}>
                     {formatKRW(budgetRemainAfter)}
+                  </td>
+                  <td className={`py-2 text-right ${budgetRemainAfter > 0 ? 'text-red-600' : 'text-blue-700'}`}>
+                    {site.direct_expense_budget > 0
+                      ? `${Math.round(((site.direct_expense_budget - budgetRemainAfter) / site.direct_expense_budget) * 100)}%`
+                      : '-'}
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
+
+          <p className="text-xs text-gray-500">
+            직접경비는 증빙으로 채운 만큼만 지급됩니다 —{' '}
+            <span className="font-medium text-blue-600">파랑 = 충족(계상 대비 100% 이상, 초과분은 총액 내 흡수)</span> ·{' '}
+            <span className="font-medium text-red-600">빨강 = 미충당(증빙 부족분만큼 삭감 위험)</span>
+          </p>
 
           {/* 경고: 잔액 초과 사용 → 미지급 */}
           {claim.unpaidAmount > 0 && (
@@ -194,64 +215,84 @@ export default async function StaffSettlementPage({
             </div>
           )}
 
-          {/* 경고: 항목별 초과 (총액 내 흡수) */}
+          {/* 안내: 항목별 초과 (총액 내 흡수 — 정상, 파랑) */}
           {claim.unpaidAmount === 0 &&
             claim.items.some((i) => i.contractAmount > 0 && i.remaining < 0) && (
-              <div className="rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm text-orange-700">
-                일부 항목이 항목별 계상금액을 초과했지만, 직접경비 총액 내이므로 타 항목 잔액에서 흡수 가능합니다.
+              <div className="rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm text-blue-700">
+                일부 항목이 계상금액을 초과 충족했습니다 — 직접경비 총액 내이므로 초과분은 타 항목 잔액에서
+                흡수되어 정상 지급됩니다 (고시 별표2 항목 간 이동 가능).
               </div>
             )}
 
-          {/* 경고: 금회 계상액 대비 부족 → 증빙 보완 필요 */}
+          {/* 경고: 금회 계상액 대비 부족 → 예상 삭감 (빨강) */}
           {budgetShortfall > 0 && (
-            <div className="rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-700">
-              금회 계상금액 {formatKRW(openRound!.budgeted_amount!)} 대비 제출된 사용액이{' '}
-              <span className="font-semibold">{formatKRW(budgetShortfall)} 부족</span>합니다 —
-              증빙으로 채우지 못한 계상분은 발주청이 삭감 후 지급하니, 사용한 비용을 빠짐없이 입력·제출해주세요.
+            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+              금회 계상금액 {formatKRW(openRound!.budgeted_amount!)} 중 증빙으로 채우지 못한{' '}
+              <span className="font-semibold">{formatKRW(budgetShortfall)}이 삭감 후 지급될 예정</span>입니다 —
+              사용한 비용을 빠짐없이 입력·제출해 계상금액을 채워주세요.
             </div>
           )}
         </div>
       )}
 
+      {/* 확정 회차 이력 — 정산서 2번 표 구조: 회차별 계상·사용·기성·잔액 */}
       {confirmedRounds.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-2 text-left font-medium text-gray-500">회차</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-500">정산기간</th>
-                <th className="px-4 py-2 text-right font-medium text-gray-500">전회기성</th>
-                <th className="px-4 py-2 text-right font-medium text-gray-500">금회기성</th>
-                <th className="px-4 py-2 text-right font-medium text-gray-500">잔액</th>
-                <th className="px-4 py-2 text-center font-medium text-gray-500">정산서</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {confirmedRounds.map((r) => {
-                const remaining = site.direct_expense_budget - (r.prior_cumulative_amount + r.claim_amount)
-                const unpaid = r.current_round_amount - r.claim_amount
-                return (
-                  <tr key={r.id}>
-                    <td className="px-4 py-3 font-medium text-gray-900">{r.round_no}회차</td>
-                    <td className="px-4 py-3 text-gray-600">{r.period_start} ~ {r.period_end}</td>
-                    <td className="px-4 py-3 text-right text-gray-600">{formatKRW(r.prior_cumulative_amount)}</td>
-                    <td className="px-4 py-3 text-right text-gray-900 font-medium">
-                      {formatKRW(r.claim_amount)}
-                      {unpaid > 0 && (
-                        <span className="block text-xs text-red-500">미지급 {formatKRW(unpaid)}</span>
-                      )}
-                    </td>
-                    <td className={`px-4 py-3 text-right font-medium ${remaining < 0 ? 'text-red-600' : 'text-blue-600'}`}>
-                      {formatKRW(remaining)}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <ReportDownloadButton siteId={siteId} roundId={r.id} label="엑셀" />
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+        <div className="rounded-lg border border-gray-200 bg-white">
+          <h3 className="border-b border-gray-100 px-4 py-3 text-sm font-semibold text-gray-800">
+            확정 회차 이력 ({confirmedRounds.length}회)
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="min-w-[760px] w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium text-gray-500">회차</th>
+                  <th className="px-4 py-2 text-left font-medium text-gray-500">정산기간</th>
+                  <th className="px-4 py-2 text-right font-medium text-gray-500">금회계상</th>
+                  <th className="px-4 py-2 text-right font-medium text-gray-500">금회사용</th>
+                  <th className="px-4 py-2 text-right font-medium text-gray-500">금회기성</th>
+                  <th className="px-4 py-2 text-right font-medium text-gray-500">누계기성</th>
+                  <th className="px-4 py-2 text-right font-medium text-gray-500">잔액</th>
+                  <th className="px-4 py-2 text-center font-medium text-gray-500">정산서</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {confirmedRounds.map((r) => {
+                  const cumulative = r.prior_cumulative_amount + r.claim_amount
+                  const remaining = site.direct_expense_budget - cumulative
+                  const unpaid = r.current_round_amount - r.claim_amount
+                  const shortfall = (r.budgeted_amount ?? 0) - r.current_round_amount
+                  return (
+                    <tr key={r.id}>
+                      <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{r.round_no}회차</td>
+                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{r.period_start} ~ {r.period_end}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">
+                        {r.budgeted_amount ? formatKRW(r.budgeted_amount) : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-600">
+                        {formatKRW(r.current_round_amount)}
+                        {shortfall > 0 && (
+                          <span className="block text-xs text-red-500">계상 대비 -{formatKRW(shortfall)} 삭감</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-900 font-medium">
+                        {formatKRW(r.claim_amount)}
+                        {unpaid > 0 && (
+                          <span className="block text-xs text-red-500">미지급 {formatKRW(unpaid)}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-600">{formatKRW(cumulative)}</td>
+                      <td className={`px-4 py-3 text-right font-medium ${remaining < 0 ? 'text-red-600' : 'text-blue-600'}`}>
+                        {formatKRW(remaining)}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <ReportDownloadButton siteId={siteId} roundId={r.id} label="엑셀" />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -261,6 +302,12 @@ export default async function StaffSettlementPage({
             {openRound.round_no}회차 진행 중 — {openRound.period_start} ~ {openRound.period_end}
           </h3>
           <div className="space-y-1 text-sm">
+            {openRound.budgeted_amount != null && openRound.budgeted_amount > 0 && (
+              <div className="flex justify-between text-gray-600">
+                <span>금회 계상금액 (산출내역서)</span>
+                <span>{formatKRW(openRound.budgeted_amount)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-gray-600">
               <span>전회기성금액</span>
               <span>{formatKRW(priorCumulative)}</span>
@@ -273,15 +320,15 @@ export default async function StaffSettlementPage({
               <span>금회기성금액 (잠정)</span>
               <span>{formatKRW(claim.claimTotal)}</span>
             </div>
-            <div className="flex justify-between font-semibold text-blue-700">
-              <span>잔액 (잠정)</span>
+            <div className={`flex justify-between font-semibold ${budgetRemainAfter > 0 ? 'text-red-600' : 'text-blue-700'}`}>
+              <span>잔액(미충당) (잠정)</span>
               <span>{formatKRW(budgetRemainAfter)}</span>
             </div>
           </div>
           {budgetRemainAfter > 0 && (
-            <div className="rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-700">
-              ⚠ 잔액이 남아있습니다. 계약기간 내 직접경비 예산을 다 사용하지 못하면 미사용분만큼 삭감될 수 있으니,
-              사용한 비용은 빠짐없이 입력·제출해주세요.
+            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+              ⚠ 미충당 계상액 {formatKRW(budgetRemainAfter)}이 남아있습니다 — 계약기간 내 증빙으로 채우지 못하면
+              그만큼 삭감된 용역비를 받게 됩니다. 사용한 비용은 빠짐없이 입력·제출해주세요.
             </div>
           )}
           <ReportDownloadButton siteId={siteId} roundId={openRound.id} label="📄 잠정 정산서 엑셀" />

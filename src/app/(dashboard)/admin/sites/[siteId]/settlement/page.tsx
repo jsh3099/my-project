@@ -152,6 +152,7 @@ export default async function SettlementRoundsPage({ params }: Props) {
               <tr>
                 <th className="px-4 py-2 text-left font-medium text-gray-500">회차</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-500">정산기간</th>
+                <th className="px-4 py-2 text-right font-medium text-gray-500">금회계상</th>
                 <th className="px-4 py-2 text-right font-medium text-gray-500">전회누계(기성)</th>
                 <th className="px-4 py-2 text-right font-medium text-gray-500">금회사용</th>
                 <th className="px-4 py-2 text-right font-medium text-gray-500">금회기성(청구)</th>
@@ -167,6 +168,9 @@ export default async function SettlementRoundsPage({ params }: Props) {
                   <tr key={r.id}>
                     <td className="px-4 py-3 font-medium text-gray-900">{r.round_no}회차</td>
                     <td className="px-4 py-3 text-gray-600">{r.period_start} ~ {r.period_end}</td>
+                    <td className="px-4 py-3 text-right text-gray-600">
+                      {r.budgeted_amount ? formatKRW(r.budgeted_amount) : '-'}
+                    </td>
                     <td className="px-4 py-3 text-right text-gray-600">{formatKRW(r.prior_cumulative_amount)}</td>
                     <td className="px-4 py-3 text-right text-gray-600">
                       {formatKRW(r.current_round_amount)}
@@ -227,7 +231,7 @@ export default async function SettlementRoundsPage({ params }: Props) {
                       <td className="py-2 text-right text-gray-600">{formatKRW(i.priorCumulative)}</td>
                       <td className="py-2 text-right text-gray-600">{formatKRW(i.usedAmount)}</td>
                       <td className="py-2 text-right font-medium text-gray-900">{formatKRW(i.claimAmount)}</td>
-                      <td className={`py-2 text-right ${i.contractAmount > 0 && i.remaining < 0 ? 'text-orange-600 font-medium' : 'text-gray-600'}`}>
+                      <td className={`py-2 text-right font-medium ${i.contractAmount <= 0 ? 'text-gray-600' : i.remaining <= 0 ? 'text-blue-600' : 'text-red-600'}`}>
                         {i.contractAmount > 0 ? formatKRW(i.remaining) : '-'}
                       </td>
                     </tr>
@@ -238,7 +242,7 @@ export default async function SettlementRoundsPage({ params }: Props) {
                   <td className="py-2 text-right text-gray-900">{formatKRW(priorClaimTotal)}</td>
                   <td className="py-2 text-right text-gray-900">{formatKRW(claim.usedTotal)}</td>
                   <td className="py-2 text-right text-blue-700">{formatKRW(claim.claimTotal)}</td>
-                  <td className={`py-2 text-right ${budgetRemainAfter < 0 ? 'text-red-600' : 'text-blue-700'}`}>
+                  <td className={`py-2 text-right ${budgetRemainAfter > 0 ? 'text-red-600' : 'text-blue-700'}`}>
                     {formatKRW(budgetRemainAfter)}
                   </td>
                 </tr>
@@ -294,20 +298,20 @@ export default async function SettlementRoundsPage({ params }: Props) {
             </div>
           )}
 
-          {/* 경고: 항목별 초과 (총액 내 흡수) */}
+          {/* 안내: 항목별 초과 (총액 내 흡수 — 정상, 파랑) */}
           {claim.unpaidAmount === 0 &&
             claim.items.some((i) => i.contractAmount > 0 && i.remaining < 0) && (
-              <div className="rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm text-orange-700">
-                일부 항목이 항목별 계상금액을 초과했지만, 직접경비 총액 내이므로 타 항목 잔액에서 흡수 가능합니다
-                (국토교통부 고시 제2023-580호 별표2 — 항목별 비용은 직접경비 내에서 변경 가능).
+              <div className="rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm text-blue-700">
+                일부 항목이 계상금액을 초과 충족했습니다 — 직접경비 총액 내이므로 초과분은 타 항목 잔액에서
+                흡수되어 정상 지급됩니다 (국토교통부 고시 제2023-580호 별표2 — 항목별 비용은 직접경비 내에서 변경 가능).
               </div>
             )}
 
-          {/* 경고: 금회 계상액 대비 부족 → 삭감 위험 */}
+          {/* 경고: 금회 계상액 대비 부족 → 예상 삭감 (빨강) */}
           {budgetShortfall > 0 && (
-            <div className="rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-700">
-              금회 계상금액 {formatKRW(openRound.budgeted_amount!)} 대비 사용액이{' '}
-              {formatKRW(budgetShortfall)} 부족합니다 — 증빙으로 채우지 못한 계상분은 발주청이 삭감 후 지급합니다.
+            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+              금회 계상금액 {formatKRW(openRound.budgeted_amount!)} 중 증빙으로 채우지 못한{' '}
+              <span className="font-semibold">{formatKRW(budgetShortfall)}이 삭감 후 지급</span>됩니다.
             </div>
           )}
 
