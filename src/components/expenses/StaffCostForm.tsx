@@ -3,7 +3,7 @@
 import { useState, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createStaffCosts, type StaffCostRow, type StaffCostMaintItem, type StaffCostCommuteCalc } from '@/actions/expenses'
-import type { Profile, AttendanceRecord } from '@/types'
+import type { Profile, AttendanceRecord, SiteStaffMember } from '@/types'
 import { calcWorkDays } from '@/lib/korean-holidays'
 import { SPECIALTIES, COMMUTE_MODE_LABELS, type CommuteMode } from '@/lib/constants'
 import { applyVatExclusion, convertJeonseToMonthly } from '@/lib/settlement'
@@ -14,6 +14,7 @@ interface Props {
   siteName: string
   yearMonth: string
   users: Profile[]
+  members: SiteStaffMember[]   // 현장 기술인 명부 (로그인 계정 없음 — 출근부 화면에서 등록)
   attendance: AttendanceRecord[]
   mealDailyLimit?: number
   applyCommuteRegulation?: boolean
@@ -314,31 +315,48 @@ function LodgingPanel({ r, onChange }: { r: Row; onChange: (patch: Partial<Row>)
   )
 }
 
-export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, mealDailyLimit = 25000, applyCommuteRegulation = true, commuteTripsDefault = 4, siteAddress, myUserId, myHomeAddress, myFuelType }: Props) {
+// 표에 뜨는 기본 인원: 계정 인원(key=userId) + 명부 인원(key=m_{memberId})
+type BasePerson = { key: string; name: string; isMember: boolean; defaultSpecialty: string | null }
+
+export function StaffCostForm({ siteId, siteName, yearMonth, users, members, attendance, mealDailyLimit = 25000, applyCommuteRegulation = true, commuteTripsDefault = 4, siteAddress, myUserId, myHomeAddress, myFuelType }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
-  const attendanceMap = Object.fromEntries(attendance.map((a) => [a.user_id, a.work_days]))
+  // 출근부 일수 — 계정 인원은 user_id, 명부 인원은 member_id 기준
+  const attendanceMap = Object.fromEntries(
+    attendance.map((a) => [a.user_id ?? `m_${a.member_id}`, a.work_days]),
+  )
+
+  const basePersons: BasePerson[] = [
+    ...users.map((u) => ({ key: u.id, name: u.full_name, isMember: false, defaultSpecialty: null })),
+    ...members.map((m) => ({ key: `m_${m.id}`, name: m.name, isMember: true, defaultSpecialty: m.specialty })),
+  ]
 
   const [rows, setRows] = useState<Record<string, Row>>(
-    Object.fromEntries(users.map((u, i) => [u.id, {
-      ...makeDefaultRow(yearMonth, SPECIALTIES[i % SPECIALTIES.length], commuteTripsDefault),
-      workDays: String(attendanceMap[u.id] ?? 0),
+    Object.fromEntries(basePersons.map((p, i) => [p.key, {
+      ...makeDefaultRow(
+        yearMonth,
+        p.defaultSpecialty && (SPECIALTIES as readonly string[]).includes(p.defaultSpecialty)
+          ? p.defaultSpecialty
+          : SPECIALTIES[i % SPECIALTIES.length],
+        commuteTripsDefault,
+      ),
+      workDays: String(attendanceMap[p.key] ?? 0),
     }]))
   )
 
   const [extraRows, setExtraRows] = useState<ExtraRow[]>([])
   const [names, setNames] = useState<Record<string, string>>(
-    Object.fromEntries(users.map((u) => [u.id, u.full_name]))
+    Object.fromEntries(basePersons.map((p) => [p.key, p.name]))
   )
-  // 현장 인원 변동이 잦아, 배정된 인원도 이번 달 입력에서 제외할 수 있어야 함
-  const [removedUserIds, setRemovedUserIds] = useState<Set<string>>(new Set())
-  const activeUsers = users.filter((u) => !removedUserIds.has(u.id))
+  // 현장 인원 변동이 잦아, 기본 인원도 이번 달 입력에서 제외할 수 있어야 함
+  const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set())
+  const activePersons = basePersons.filter((p) => !removedKeys.has(p.key))
 
-  function removeUserRow(uid: string) {
-    setRemovedUserIds((p) => new Set(p).add(uid))
+  function removePersonRow(key: string) {
+    setRemovedKeys((p) => new Set(p).add(key))
   }
 
   const [receipts, setReceipts] = useState<Record<string, AttachedFile[]>>({})
@@ -386,7 +404,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
 
   // 직종 중복 시 자동 번호 부여
   const allSpecialties: { id: string; sp: string }[] = [
-    ...activeUsers.map((u) => ({ id: u.id, sp: rows[u.id]?.specialty ?? '' })),
+    ...activePersons.map((p) => ({ id: p.key, sp: rows[p.key]?.specialty ?? '' })),
     ...extraRows.map((r) => ({ id: r.id, sp: r.specialty })),
   ]
   const spCount: Record<string, number> = {}
@@ -403,7 +421,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
   }
 
   // 합계
-  const allRows = [...activeUsers.map((u) => rows[u.id]), ...extraRows].filter(Boolean) as Row[]
+  const allRows = [...activePersons.map((p) => rows[p.key]), ...extraRows].filter(Boolean) as Row[]
   const totals = allRows.reduce((acc, r) => {
     const d = deriveRow(r, mealDailyLimit)
     acc.meal += d.meal
@@ -442,7 +460,8 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
   function handleSave() {
     setError(null)
     const payload: StaffCostRow[] = [
-      ...activeUsers.map((u) => buildPayloadRow(u.id, u.id, names[u.id] ?? u.full_name, rows[u.id])),
+      // 명부 인원(m_*)은 계정이 없으므로 이름으로 식별 (서버가 target_user_name 기준 reconcile)
+      ...activePersons.map((p) => buildPayloadRow(p.key, p.isMember ? '' : p.key, names[p.key] ?? p.name, rows[p.key])),
       ...extraRows.map((r) => buildPayloadRow(r.id, '', r.name || '(추가)', r)),
     ]
 
@@ -616,20 +635,20 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
     )
   }
 
-  function UserRow({ u }: { u: Profile }) {
-    const id = u.id
+  function PersonRowItem({ p }: { p: BasePerson }) {
+    const id = p.key
     return (
       <>
         <tr className="hover:bg-gray-50">
           <RowCells id={id} r={rows[id]} name={
             <input
-              type="text" value={names[id] ?? u.full_name}
-              onChange={(e) => setNames((p) => ({ ...p, [id]: e.target.value }))}
+              type="text" value={names[id] ?? p.name}
+              onChange={(e) => setNames((prev) => ({ ...prev, [id]: e.target.value }))}
               className="w-28 rounded border border-gray-300 bg-white px-2 py-1.5 text-sm font-medium text-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-none hover:border-gray-400"
             />
           } />
           <td className="px-1 py-2">
-            <button type="button" onClick={() => removeUserRow(id)} title="이번 달 입력에서 제외"
+            <button type="button" onClick={() => removePersonRow(id)} title="이번 달 입력에서 제외"
               className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500">
               ✕
             </button>
@@ -697,7 +716,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, attendance, 
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {activeUsers.map((u) => <UserRow key={u.id} u={u} />)}
+            {activePersons.map((p) => <PersonRowItem key={p.key} p={p} />)}
             {extraRows.map((r) => <ExtraRowItem key={r.id} r={r} />)}
           </tbody>
           <tfoot className="bg-gray-50 text-xs font-semibold text-gray-700">

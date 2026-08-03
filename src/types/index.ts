@@ -58,11 +58,40 @@ export type UserSiteAssignment = {
 export type AttendanceRecord = {
   id: string
   site_id: string
-  user_id: string
+  user_id: string | null         // 로그인 계정 인원 (member_id와 택1)
+  member_id: string | null       // 현장 기술인 명부 인원 (user_id와 택1)
   year: number
   month: number
   work_days: number
+  visit_dates: string[] | null   // 기술지원 방문일자 (출근부 기준) — 상주는 null
   file_path: string | null
+  created_at: string
+  updated_at: string
+}
+
+// 현장 기술인 명부 — 로그인 계정이 없는 상주/기술지원 기술인 (출근부·정산 인원의 원천)
+export type SiteStaffMember = {
+  id: string
+  site_id: string
+  name: string
+  specialty: string | null
+  staff_type: StaffType
+  is_active: boolean
+  sort_order: number
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+// 출근부 첨부 — 현장×연월×구분(상주/기술지원). 현장이 작성·서명한 출근부 스캔이 원본 증빙
+export type AttendanceSheet = {
+  id: string
+  site_id: string
+  year: number
+  month: number
+  staff_type: StaffType
+  file_urls: string[]
+  uploaded_by: string | null
   created_at: string
   updated_at: string
 }

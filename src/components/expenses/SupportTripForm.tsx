@@ -7,7 +7,7 @@
 import { useState, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createSupportTrips, type SupportTripRow } from '@/actions/expenses'
-import type { Profile } from '@/types'
+import type { Profile, AttendanceRecord, SiteStaffMember } from '@/types'
 import { SPECIALTIES, VEHICLE_FUEL_TYPE_LABELS, FUEL_EFFICIENCY, type VehicleFuelType } from '@/lib/constants'
 import { calcTripVisit } from '@/lib/settlement'
 
@@ -16,6 +16,8 @@ interface Props {
   siteName: string
   yearMonth: string
   users: Profile[]
+  members: SiteStaffMember[]      // 현장 기술인 명부 (로그인 계정 없음 — 출근부 화면에서 등록)
+  attendance: AttendanceRecord[]  // 출근부 방문일자 — 방문일 프리필 기준
   siteAddress?: string | null
   tripDailyAllowance?: number
   tripMealAllowance?: number
@@ -41,21 +43,38 @@ let rowSeq = 0
 
 function parseNum(v: string) { return parseInt(v.replace(/,/g, ''), 10) || 0 }
 
-export function SupportTripForm({ siteId, siteName, yearMonth, users, siteAddress, tripDailyAllowance = 25000, tripMealAllowance = 25000 }: Props) {
+export function SupportTripForm({ siteId, siteName, yearMonth, users, members, attendance, siteAddress, tripDailyAllowance = 25000, tripMealAllowance = 25000 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
-  const [rows, setRows] = useState<PersonRow[]>(
-    users.map((u, i) => ({
+  // 출근부 방문일자 → 방문일 프리필 (유가·통행료는 입력)
+  const visitDatesOf = (key: { user_id?: string; member_id?: string }): Visit[] => {
+    const rec = attendance.find((a) => (key.user_id ? a.user_id === key.user_id : a.member_id === key.member_id))
+    return (rec?.visit_dates ?? []).map((date) => ({ date, fuelPrice: '', fuelPriceDate: '', toll: '' }))
+  }
+
+  const [rows, setRows] = useState<PersonRow[]>([
+    ...users.map((u, i) => ({
       id: u.id, userId: u.id, name: u.full_name,
       specialty: SPECIALTIES[i % SPECIALTIES.length],
       originAddress: '', distanceOneway: '', fuelType: 'gasoline' as VehicleFuelType,
-      visits: [], mapFile: null,
-    }))
+      visits: visitDatesOf({ user_id: u.id }), mapFile: null,
+    })),
+    // 명부 인원 — 계정이 없으므로 이름으로 식별 (userId='')
+    ...members.map((m, i) => ({
+      id: `m_${m.id}`, userId: '', name: m.name,
+      specialty: m.specialty && (SPECIALTIES as readonly string[]).includes(m.specialty)
+        ? m.specialty
+        : SPECIALTIES[(users.length + i) % SPECIALTIES.length],
+      originAddress: '', distanceOneway: '', fuelType: 'gasoline' as VehicleFuelType,
+      visits: visitDatesOf({ member_id: m.id }), mapFile: null,
+    })),
+  ])
+  const [openRows, setOpenRows] = useState<Set<string>>(
+    new Set([...users.map((u) => u.id), ...members.map((m) => `m_${m.id}`)])
   )
-  const [openRows, setOpenRows] = useState<Set<string>>(new Set(users.map((u) => u.id)))
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({})
 
   function patchRow(id: string, patch: Partial<PersonRow>) {

@@ -5,7 +5,7 @@ import { StaffCostForm } from '@/components/expenses/StaffCostForm'
 import { SupportTripForm } from '@/components/expenses/SupportTripForm'
 import type { StaffType } from '@/lib/constants'
 import { STAFF_TYPE_LABELS } from '@/lib/constants'
-import type { Site, Profile, AttendanceRecord } from '@/types'
+import type { Site, Profile, AttendanceRecord, SiteStaffMember } from '@/types'
 
 function currentYearMonth() {
   const d = new Date()
@@ -67,15 +67,26 @@ export async function StaffCostsPageContent({
     if (profilesData) staffUsers.push(...(profilesData as Profile[]))
   }
 
-  // 출근부 데이터
-  const { data: attendanceData } = await supabase
-    .from('attendance_records')
-    .select('*')
-    .eq('site_id', siteId)
-    .eq('year', parseInt(year, 10))
-    .eq('month', month)
+  // 출근부 데이터 + 현장 기술인 명부 (로그인 계정이 없는 인원)
+  const [{ data: attendanceData }, { data: membersData }] = await Promise.all([
+    supabase
+      .from('attendance_records')
+      .select('*')
+      .eq('site_id', siteId)
+      .eq('year', parseInt(year, 10))
+      .eq('month', month),
+    supabase
+      .from('site_staff_members')
+      .select('*')
+      .eq('site_id', siteId)
+      .eq('staff_type', staffType)
+      .eq('is_active', true)
+      .order('sort_order')
+      .order('created_at'),
+  ])
 
   const attendance = (attendanceData ?? []) as AttendanceRecord[]
+  const members = (membersData ?? []) as SiteStaffMember[]
   const me = staffUsers.find((u) => u.id === user.id)
 
   // 현장별 정산 파라미터 (식대 한도·여비규정 적용 여부)
@@ -127,6 +138,8 @@ export async function StaffCostsPageContent({
           siteName={siteName}
           yearMonth={yearMonth}
           users={staffUsers}
+          members={members}
+          attendance={attendance}
           siteAddress={site?.address}
           tripDailyAllowance={siteParams?.trip_daily_allowance ?? 25000}
           tripMealAllowance={siteParams?.trip_meal_allowance ?? 25000}
@@ -137,6 +150,7 @@ export async function StaffCostsPageContent({
           siteName={siteName}
           yearMonth={yearMonth}
           users={staffUsers}
+          members={members}
           attendance={attendance}
           mealDailyLimit={siteParams?.meal_allowance_daily_limit ?? 25000}
           applyCommuteRegulation={siteParams?.apply_commute_regulation ?? true}
