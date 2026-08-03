@@ -190,6 +190,30 @@ export async function getSettlementReportData(
   }
 }
 
+// 세부 사용내역 섹션 번호: 주재비 1-N, 출장비 2-N, 나머지 3-N (실제 정산서 관행)
+// — 총괄 3번 표 비고 열과 세부 섹션 제목에 공통 사용 (엑셀·PDF 공유)
+export function buildSectionNumbers(data: SettlementReportData): Map<string, string> {
+  const m = new Map<string, string>()
+  const has = (sub: string) => data.expenses.some((e) => e.subcategory === sub && recognized(e) > 0)
+  let n = 0
+  // 숙소비(임대+관리)는 하나의 섹션
+  if (has('lodging_rent') || has('lodging_maintenance')) { n++; m.set('lodging', `1-${n}`) }
+  if (has('meal')) { n++; m.set('meal', `1-${n}`) }
+  if (has('commute')) { n++; m.set('commute', `1-${n}`) }
+  for (const sub of ['office_supplies', 'safety_supplies', 'office_equipment', 'communication', 'welfare', 'office_rent']) {
+    if (has(sub)) { n++; m.set(sub, `1-${n}`) }
+  }
+  let t = 0
+  for (const sub of ['support_trip', 'trip_lodging', 'trip_daily', 'trip_meal', 'trip_transport']) {
+    if (has(sub)) { t++; m.set(sub, `2-${t}`) }
+  }
+  let p = 0
+  for (const sub of ['print_bind', 'vehicle_rent', 'fuel', 'vehicle_maintenance', 'local_salary']) {
+    if (has(sub)) { p++; m.set(sub, `3-${p}`) }
+  }
+  return m
+}
+
 function groupBy<T>(arr: T[], key: (t: T) => string): Map<string, T[]> {
   const m = new Map<string, T[]>()
   for (const item of arr) {

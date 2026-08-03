@@ -183,7 +183,10 @@ export default async function SettlementRoundsPage({ params }: Props) {
                       {formatKRW(remaining)}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <ReportDownloadButton siteId={siteId} roundId={r.id} label="엑셀" />
+                      <span className="inline-flex gap-1">
+                        <ReportDownloadButton siteId={siteId} roundId={r.id} label="엑셀" />
+                        <ReportDownloadButton siteId={siteId} roundId={r.id} label="PDF" format="pdf" />
+                      </span>
                     </td>
                   </tr>
                 )
@@ -205,7 +208,10 @@ export default async function SettlementRoundsPage({ params }: Props) {
             <h3 className="text-sm font-semibold text-gray-800">
               {openRound.round_no}회차 진행 중 — {openRound.period_start} ~ {openRound.period_end}
             </h3>
-            <ReportDownloadButton siteId={siteId} roundId={openRound.id} label="📄 잠정 정산서 엑셀" />
+            <span className="inline-flex gap-2">
+              <ReportDownloadButton siteId={siteId} roundId={openRound.id} label="📄 잠정 정산서 엑셀" />
+              <ReportDownloadButton siteId={siteId} roundId={openRound.id} label="📄 잠정 정산서 PDF" format="pdf" />
+            </span>
           </div>
 
           {/* 항목별 계상 대비 사용·청구 (정산서 2번 표 미리보기) */}

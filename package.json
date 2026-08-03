@@ -11,12 +11,14 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@expo-google-fonts/noto-sans-kr": "^0.4.3",
     "@hookform/resolvers": "^5.4.0",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.2",
     "exceljs": "^4.4.0",
     "lucide-react": "^1.22.0",
     "next": "16.2.9",
+    "pdfmake": "^0.3.11",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-hook-form": "^7.80.0",
@@ -25,6 +27,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pdfmake": "^0.3.3",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

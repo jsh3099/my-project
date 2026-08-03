@@ -6,12 +6,15 @@ interface Props {
   siteId: string
   roundId?: string | null
   label?: string
+  /** 출력 형식 — excel(기본) 또는 pdf (F-22) */
+  format?: 'excel' | 'pdf'
 }
 
-// 정산서 엑셀 다운로드 버튼 — fetch → blob 방식 (실패 시 서버 에러 메시지 표시)
-export function ReportDownloadButton({ siteId, roundId, label = '📄 정산서 엑셀' }: Props) {
+// 정산서 엑셀·PDF 다운로드 버튼 — fetch → blob 방식 (실패 시 서버 에러 메시지 표시)
+export function ReportDownloadButton({ siteId, roundId, label, format = 'excel' }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const buttonLabel = label ?? (format === 'pdf' ? '📄 정산서 PDF' : '📄 정산서 엑셀')
 
   async function handleDownload() {
     setLoading(true)
@@ -19,7 +22,7 @@ export function ReportDownloadButton({ siteId, roundId, label = '📄 정산서 
     try {
       const params = new URLSearchParams({ site: siteId })
       if (roundId) params.set('round', roundId)
-      const res = await fetch(`/api/reports/excel?${params}`)
+      const res = await fetch(`/api/reports/${format === 'pdf' ? 'pdf' : 'excel'}?${params}`)
       if (!res.ok) {
         const body = await res.json().catch(() => null)
         throw new Error(body?.error ?? `다운로드 실패 (${res.status})`)
@@ -27,7 +30,7 @@ export function ReportDownloadButton({ siteId, roundId, label = '📄 정산서 
       const blob = await res.blob()
       const disposition = res.headers.get('Content-Disposition') ?? ''
       const match = disposition.match(/filename\*=UTF-8''([^;]+)/)
-      const fileName = match ? decodeURIComponent(match[1]) : '정산서.xlsx'
+      const fileName = match ? decodeURIComponent(match[1]) : format === 'pdf' ? '정산서.pdf' : '정산서.xlsx'
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -47,9 +50,13 @@ export function ReportDownloadButton({ siteId, roundId, label = '📄 정산서 
         type="button"
         onClick={handleDownload}
         disabled={loading}
-        className="rounded-md border border-green-300 bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
+        className={
+          format === 'pdf'
+            ? 'rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50'
+            : 'rounded-md border border-green-300 bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50'
+        }
       >
-        {loading ? '생성 중...' : label}
+        {loading ? '생성 중...' : buttonLabel}
       </button>
       {error && <span className="text-xs text-red-600">{error}</span>}
     </span>

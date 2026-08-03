@@ -285,7 +285,10 @@ export default async function StaffSettlementPage({
                         {formatKRW(remaining)}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <ReportDownloadButton siteId={siteId} roundId={r.id} label="엑셀" />
+                        <span className="inline-flex gap-1">
+                          <ReportDownloadButton siteId={siteId} roundId={r.id} label="엑셀" />
+                          <ReportDownloadButton siteId={siteId} roundId={r.id} label="PDF" format="pdf" />
+                        </span>
                       </td>
                     </tr>
                   )
@@ -331,12 +334,18 @@ export default async function StaffSettlementPage({
               그만큼 삭감된 용역비를 받게 됩니다. 사용한 비용은 빠짐없이 입력·제출해주세요.
             </div>
           )}
-          <ReportDownloadButton siteId={siteId} roundId={openRound.id} label="📄 잠정 정산서 엑셀" />
+          <div className="flex gap-2">
+            <ReportDownloadButton siteId={siteId} roundId={openRound.id} label="📄 잠정 정산서 엑셀" />
+            <ReportDownloadButton siteId={siteId} roundId={openRound.id} label="📄 잠정 정산서 PDF" format="pdf" />
+          </div>
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 space-y-3 text-center text-sm text-gray-400">
           <p>진행 중인 회차가 없습니다. 본사 정산 담당자에게 문의하세요.</p>
-          <ReportDownloadButton siteId={siteId} label="📄 잠정 정산서 엑셀 (미편입 지출)" />
+          <div className="flex justify-center gap-2">
+            <ReportDownloadButton siteId={siteId} label="📄 잠정 정산서 엑셀 (미편입 지출)" />
+            <ReportDownloadButton siteId={siteId} label="📄 잠정 정산서 PDF (미편입 지출)" format="pdf" />
+          </div>
         </div>
       )}
     </div>
