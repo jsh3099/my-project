@@ -3,7 +3,7 @@
 import { useState, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createStaffCosts, type StaffCostRow, type StaffCostMaintItem, type StaffCostCommuteCalc } from '@/actions/expenses'
-import type { Profile, AttendanceRecord, SiteStaffMember } from '@/types'
+import type { AttendanceRecord, SiteStaffMember } from '@/types'
 import { calcWorkDays } from '@/lib/korean-holidays'
 import { SPECIALTIES, COMMUTE_MODE_LABELS, type CommuteMode } from '@/lib/constants'
 import { applyVatExclusion, convertJeonseToMonthly } from '@/lib/settlement'
@@ -13,8 +13,7 @@ interface Props {
   siteId: string
   siteName: string
   yearMonth: string
-  users: Profile[]
-  members: SiteStaffMember[]   // 현장 기술인 명부 (로그인 계정 없음 — 출근부 화면에서 등록)
+  members: SiteStaffMember[]   // 현장 기술인 명부 — 정산 인원의 단일 원천 (출근부 화면에서 등록)
   attendance: AttendanceRecord[]
   mealDailyLimit?: number
   applyCommuteRegulation?: boolean
@@ -315,24 +314,23 @@ function LodgingPanel({ r, onChange }: { r: Row; onChange: (patch: Partial<Row>)
   )
 }
 
-// 표에 뜨는 기본 인원: 계정 인원(key=userId) + 명부 인원(key=m_{memberId})
-type BasePerson = { key: string; name: string; isMember: boolean; defaultSpecialty: string | null }
+// 표에 뜨는 기본 인원: 명부 인원(key=m_{memberId})
+type BasePerson = { key: string; name: string; defaultSpecialty: string | null }
 
-export function StaffCostForm({ siteId, siteName, yearMonth, users, members, attendance, mealDailyLimit = 25000, applyCommuteRegulation = true, commuteTripsDefault = 4, siteAddress, myUserId, myHomeAddress, myFuelType }: Props) {
+export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance, mealDailyLimit = 25000, applyCommuteRegulation = true, commuteTripsDefault = 4, siteAddress, myUserId, myHomeAddress, myFuelType }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
-  // 출근부 일수 — 계정 인원은 user_id, 명부 인원은 member_id 기준
+  // 출근부 일수 — 명부 인원 member_id 기준
   const attendanceMap = Object.fromEntries(
     attendance.map((a) => [a.user_id ?? `m_${a.member_id}`, a.work_days]),
   )
 
-  const basePersons: BasePerson[] = [
-    ...users.map((u) => ({ key: u.id, name: u.full_name, isMember: false, defaultSpecialty: null })),
-    ...members.map((m) => ({ key: `m_${m.id}`, name: m.name, isMember: true, defaultSpecialty: m.specialty })),
-  ]
+  const basePersons: BasePerson[] = members.map((m) => ({
+    key: `m_${m.id}`, name: m.name, defaultSpecialty: m.specialty,
+  }))
 
   const [rows, setRows] = useState<Record<string, Row>>(
     Object.fromEntries(basePersons.map((p, i) => [p.key, {
@@ -460,8 +458,8 @@ export function StaffCostForm({ siteId, siteName, yearMonth, users, members, att
   function handleSave() {
     setError(null)
     const payload: StaffCostRow[] = [
-      // 명부 인원(m_*)은 계정이 없으므로 이름으로 식별 (서버가 target_user_name 기준 reconcile)
-      ...activePersons.map((p) => buildPayloadRow(p.key, p.isMember ? '' : p.key, names[p.key] ?? p.name, rows[p.key])),
+      // 명부 인원은 계정이 없으므로 이름으로 식별 (서버가 target_user_name 기준 reconcile)
+      ...activePersons.map((p) => buildPayloadRow(p.key, '', names[p.key] ?? p.name, rows[p.key])),
       ...extraRows.map((r) => buildPayloadRow(r.id, '', r.name || '(추가)', r)),
     ]
 

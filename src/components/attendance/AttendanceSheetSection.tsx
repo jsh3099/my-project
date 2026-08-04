@@ -5,29 +5,28 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { upsertAttendance, addSiteStaffMember, deactivateSiteStaffMember } from '@/actions/attendance'
 import { STAFF_TYPE_LABELS, SPECIALTIES, type StaffType } from '@/lib/constants'
-import type { Profile, AttendanceRecord, AttendanceSheet, SiteStaffMember } from '@/types'
+import type { AttendanceRecord, AttendanceSheet, SiteStaffMember } from '@/types'
 
 interface Props {
   siteId: string
   year: number
   month: number
   staffType: StaffType
-  users: Profile[]         // 로그인 계정 인원 (현장 배정)
-  members: SiteStaffMember[] // 기술인 명부 인원 (화면에서 추가)
+  members: SiteStaffMember[] // 기술인 명부 인원 — 정산 인원의 단일 원천 (로그인 계정과 무관)
   records: AttendanceRecord[]
   sheet: AttendanceSheet | null
 }
 
-// 통합 인원 행 — 계정 인원(key=userId)과 명부 인원(key=m_{memberId})을 한 표로
+// 인원 행 (key=m_{memberId})
 type PersonRow = {
   key: string
   name: string
   specialty: string | null
-  memberId: string | null // 명부 인원만 제외(비활성) 가능
+  memberId: string
 }
 
 // 출근부 구분 섹션 — 첨부(현장 작성·서명본 스캔) + 인원별 일수(상주)/방문일(기술지원) 전기
-export function AttendanceSheetSection({ siteId, year, month, staffType, users, members, records, sheet }: Props) {
+export function AttendanceSheetSection({ siteId, year, month, staffType, members, records, sheet }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [isMemberPending, startMemberTransition] = useTransition()
@@ -39,13 +38,11 @@ export function AttendanceSheetSection({ siteId, year, month, staffType, users, 
   const [newName, setNewName] = useState('')
   const [newSpecialty, setNewSpecialty] = useState('')
 
-  const persons: PersonRow[] = [
-    ...users.map((u) => ({ key: u.id, name: u.full_name, specialty: null, memberId: null })),
-    ...members.map((m) => ({ key: `m_${m.id}`, name: m.name, specialty: m.specialty, memberId: m.id })),
-  ]
+  const persons: PersonRow[] = members.map((m) => ({
+    key: `m_${m.id}`, name: m.name, specialty: m.specialty, memberId: m.id,
+  }))
 
-  const recordOf = (p: PersonRow) =>
-    records.find((r) => (p.memberId ? r.member_id === p.memberId : r.user_id === p.key))
+  const recordOf = (p: PersonRow) => records.find((r) => r.member_id === p.memberId)
 
   // 기술지원 방문일자 상태: personKey → dates[]
   const [visitDates, setVisitDates] = useState<Record<string, string[]>>(
@@ -256,17 +253,15 @@ export function AttendanceSheetSection({ siteId, year, month, staffType, users, 
                   </td>
                 )}
                 <td className="px-2 py-3 text-center">
-                  {p.memberId && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveMember(p.memberId!, p.name)}
-                      disabled={isMemberPending}
-                      className="rounded px-1.5 text-xs text-gray-400 hover:bg-red-50 hover:text-red-500"
-                      title="명단에서 제외"
-                    >
-                      ✕
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveMember(p.memberId, p.name)}
+                    disabled={isMemberPending}
+                    className="rounded px-1.5 text-xs text-gray-400 hover:bg-red-50 hover:text-red-500"
+                    title="명단에서 제외"
+                  >
+                    ✕
+                  </button>
                 </td>
               </tr>
             ))}

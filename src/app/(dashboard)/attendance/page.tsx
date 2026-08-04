@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { AttendanceSheetSection } from '@/components/attendance/AttendanceSheetSection'
 import type { StaffType } from '@/lib/constants'
-import type { Site, Profile, AttendanceRecord, AttendanceSheet, SiteStaffMember } from '@/types'
+import type { Site, AttendanceRecord, AttendanceSheet, SiteStaffMember } from '@/types'
 
 function currentYearMonth() {
   const d = new Date()
@@ -41,35 +40,8 @@ export default async function AttendancePage({
     return <div className="p-8 text-center text-sm text-gray-400">배정된 현장이 없습니다.</div>
   }
 
-  // 현장 배치 인원 (상주/기술지원 구분) — admin client로 RLS 우회 조회
-  const admin = createAdminClient()
-  const { data: siteAssignments } = await admin
-    .from('user_site_assignments')
-    .select('user_id, staff_type')
-    .eq('site_id', siteId)
-    .eq('is_active', true)
-
-  // 동일 사용자에게 활성 배정 행이 중복될 수 있어 구분별로 dedupe
-  const byType = new Map<StaffType, Set<string>>([['resident', new Set()], ['support', new Set()]])
-  for (const a of siteAssignments ?? []) {
-    byType.get((a.staff_type ?? 'resident') as StaffType)?.add(a.user_id)
-  }
-
-  const allIds = [...new Set([...(byType.get('resident') ?? []), ...(byType.get('support') ?? [])])]
-  const profilesById = new Map<string, Profile>()
-  if (allIds.length > 0) {
-    const { data: profilesData } = await admin
-      .from('profiles')
-      .select('*')
-      .in('id', allIds)
-      .eq('is_active', true)
-      .order('full_name')
-    for (const p of (profilesData ?? []) as Profile[]) profilesById.set(p.id, p)
-  }
-  const usersOf = (t: StaffType) =>
-    [...(byType.get(t) ?? [])].map((id) => profilesById.get(id)).filter(Boolean) as Profile[]
-
   // 기존 출근부(일수·방문일), 첨부, 기술인 명부
+  // 정산 인원의 원천은 기술인 명부(site_staff_members)이며, 로그인 계정은 권한용으로만 쓴다
   const [{ data: recordsData }, { data: sheetsData }, { data: membersData }] = await Promise.all([
     supabase
       .from('attendance_records')
@@ -142,7 +114,6 @@ export default async function AttendancePage({
         year={year}
         month={month}
         staffType="resident"
-        users={usersOf('resident')}
         members={membersOf('resident')}
         records={records}
         sheet={sheetOf('resident')}
@@ -152,7 +123,6 @@ export default async function AttendancePage({
         year={year}
         month={month}
         staffType="support"
-        users={usersOf('support')}
         members={membersOf('support')}
         records={records}
         sheet={sheetOf('support')}

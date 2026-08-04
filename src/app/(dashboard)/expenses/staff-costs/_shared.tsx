@@ -46,28 +46,10 @@ export async function StaffCostsPageContent({
     )
   }
 
-  // 현장 직원 목록 (admin client로 RLS 우회), 상주/기술지원 구분으로 필터링
+  // 정산 인원의 원천은 기술인 명부(site_staff_members) — 로그인 계정은 권한용으로만 쓴다
   const admin = createAdminClient()
-  const { data: siteAssignments } = await admin
-    .from('user_site_assignments')
-    .select('user_id')
-    .eq('site_id', siteId)
-    .eq('is_active', true)
-    .eq('staff_type', staffType)
 
-  const userIds = (siteAssignments ?? []).map((a) => a.user_id)
-  const staffUsers: Profile[] = []
-  if (userIds.length > 0) {
-    const { data: profilesData } = await admin
-      .from('profiles')
-      .select('*')
-      .in('id', userIds)
-      .eq('is_active', true)
-      .order('full_name')
-    if (profilesData) staffUsers.push(...(profilesData as Profile[]))
-  }
-
-  // 출근부 데이터 + 현장 기술인 명부 (로그인 계정이 없는 인원)
+  // 출근부 데이터 + 현장 기술인 명부
   const [{ data: attendanceData }, { data: membersData }] = await Promise.all([
     supabase
       .from('attendance_records')
@@ -87,7 +69,10 @@ export async function StaffCostsPageContent({
 
   const attendance = (attendanceData ?? []) as AttendanceRecord[]
   const members = (membersData ?? []) as SiteStaffMember[]
-  const me = staffUsers.find((u) => u.id === user.id)
+
+  // 자차 산출 기본값(자택주소·유종)용 본인 프로필
+  const { data: meData } = await admin.from('profiles').select('*').eq('id', user.id).maybeSingle()
+  const me = (meData as Profile) ?? null
 
   // 현장별 정산 파라미터 (식대 한도·여비규정 적용 여부)
   const { data: siteParams } = await admin
@@ -137,7 +122,6 @@ export async function StaffCostsPageContent({
           siteId={siteId}
           siteName={siteName}
           yearMonth={yearMonth}
-          users={staffUsers}
           members={members}
           attendance={attendance}
           siteAddress={site?.address}
@@ -149,7 +133,6 @@ export async function StaffCostsPageContent({
           siteId={siteId}
           siteName={siteName}
           yearMonth={yearMonth}
-          users={staffUsers}
           members={members}
           attendance={attendance}
           mealDailyLimit={siteParams?.meal_allowance_daily_limit ?? 25000}
