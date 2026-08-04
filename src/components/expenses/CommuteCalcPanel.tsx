@@ -51,7 +51,7 @@ export function CommuteCalcPanel({ siteAddress, isOwnRow, defaultHomeAddress, de
     ? calcCommute({ mode: 'lodging_return', distanceOnewayKm: distNum, fuelEfficiency: efficiency, fuelPrice: priceNum, tollRoundtrip: tollNum, multiplier: 1 })
     : null
 
-  // 네이버 지도 경로 자동조회 (NCP 키 있을 때만 동작 — 실패 시 수동입력 안내)
+  // 카카오 길찾기 경로 자동조회 (KAKAO_REST_API_KEY 설정 시 동작 — 실패 시 수동입력 안내)
   function handleAutoRoute() {
     setError('')
     if (!siteAddress) { setError('현장 주소가 등록되어 있지 않습니다. 거리를 직접 입력하세요.'); return }
@@ -64,7 +64,7 @@ export function CommuteCalcPanel({ siteAddress, isOwnRow, defaultHomeAddress, de
     startTransition(async () => {
       const res = await calcCommuteCost(formData)
       if ('error' in res) {
-        setError(res.error + ' — 카카오맵 등에서 확인한 편도거리를 직접 입력해도 됩니다.')
+        setError(res.error + ' — 지도에서 확인한 편도거리를 직접 입력해도 됩니다.')
       } else {
         setDistanceOneway(String(res.data.distanceOneWayKm))
         setToll(res.data.tollRoundTrip > 0 ? res.data.tollRoundTrip.toLocaleString('ko-KR') : '')
@@ -127,7 +127,7 @@ export function CommuteCalcPanel({ siteAddress, isOwnRow, defaultHomeAddress, de
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
             />
             <button type="button" onClick={handleAutoRoute} disabled={isPending}
-              title="네이버 지도 경로 자동조회 (실패 시 카카오맵 거리를 직접 입력)"
+              title="카카오 길찾기 경로 자동조회 (거리·통행료 자동 입력)"
               className="whitespace-nowrap rounded border border-green-300 bg-white px-2 py-1.5 text-xs text-green-700 hover:bg-green-50 disabled:opacity-50">
               {isPending ? '…' : '자동'}
             </button>

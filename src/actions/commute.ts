@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { geocodeAddress, getDrivingRoute } from '@/lib/naverMaps'
+import { geocodeAddress, getDrivingRoute } from '@/lib/kakaoMaps'
 import { FUEL_EFFICIENCY, type VehicleFuelType } from '@/lib/constants'
 
 export async function saveMyTransportInfo(formData: FormData) {
