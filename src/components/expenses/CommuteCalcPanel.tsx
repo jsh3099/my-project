@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { calcCommuteCost, saveMyTransportInfo } from '@/actions/commute'
+import { getFuelPriceForDate } from '@/actions/fuelPrice'
 import { calcCommute } from '@/lib/settlement'
 import { VEHICLE_FUEL_TYPE_LABELS, FUEL_EFFICIENCY, type VehicleFuelType } from '@/lib/constants'
 
@@ -68,6 +69,21 @@ export function CommuteCalcPanel({ siteAddress, isOwnRow, defaultHomeAddress, de
       } else {
         setDistanceOneway(String(res.data.distanceOneWayKm))
         setToll(res.data.tollRoundTrip > 0 ? res.data.tollRoundTrip.toLocaleString('ko-KR') : '')
+      }
+    })
+  }
+
+  // 오피넷 전국 일별 평균 유가 자동조회 — 기준일 미선택 시 오늘 유가
+  function handleAutoFuelPrice() {
+    setError('')
+    const targetDate = fuelPriceDate || new Date().toISOString().slice(0, 10)
+    startTransition(async () => {
+      const res = await getFuelPriceForDate(targetDate, fuelType)
+      if ('error' in res) {
+        setError(res.error)
+      } else {
+        setFuelPrice(res.data.price.toLocaleString('ko-KR'))
+        setFuelPriceDate(res.data.date)
       }
     })
   }
@@ -144,12 +160,19 @@ export function CommuteCalcPanel({ siteAddress, isOwnRow, defaultHomeAddress, de
         </div>
         <div>
           <label className="mb-0.5 block text-xs text-gray-500">유가 ({FUEL_EFFICIENCY[fuelType].priceUnit})</label>
-          <input
-            type="text" inputMode="numeric" value={fuelPrice}
-            onChange={(e) => { const r = e.target.value.replace(/[^0-9]/g, ''); setFuelPrice(r ? parseInt(r).toLocaleString('ko-KR') : '') }}
-            placeholder="예: 1,650"
-            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
-          />
+          <div className="flex gap-1">
+            <input
+              type="text" inputMode="numeric" value={fuelPrice}
+              onChange={(e) => { const r = e.target.value.replace(/[^0-9]/g, ''); setFuelPrice(r ? parseInt(r).toLocaleString('ko-KR') : '') }}
+              placeholder="예: 1,650"
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+            />
+            <button type="button" onClick={handleAutoFuelPrice} disabled={isPending}
+              title="오피넷 전국 일별 평균 유가 자동조회 (기준일 미선택 시 오늘)"
+              className="whitespace-nowrap rounded border border-green-300 bg-white px-2 py-1.5 text-xs text-green-700 hover:bg-green-50 disabled:opacity-50">
+              {isPending ? '…' : '자동'}
+            </button>
+          </div>
         </div>
         <div>
           <label className="mb-0.5 block text-xs text-gray-500">유가 기준일 (opinet.co.kr 고시)</label>

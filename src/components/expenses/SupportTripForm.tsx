@@ -7,6 +7,7 @@
 import { useState, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createSupportTrips, type SupportTripRow } from '@/actions/expenses'
+import { getFuelPriceForDate } from '@/actions/fuelPrice'
 import type { AttendanceRecord, SiteStaffMember } from '@/types'
 import { SPECIALTIES, VEHICLE_FUEL_TYPE_LABELS, FUEL_EFFICIENCY, type VehicleFuelType } from '@/lib/constants'
 import { calcTripVisit } from '@/lib/settlement'
@@ -128,6 +129,21 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
 
   function rowTotal(r: PersonRow) {
     return r.visits.reduce((s, v) => s + (visitCalc(r, v)?.total ?? 0), 0)
+  }
+
+  // 방문일 기준 오피넷 유가 자동조회 → 유가·유가 기준일 채움 (예본: 운행일자 고시 유가 적용)
+  function autoFuelPrice(rowId: string, idx: number, date: string, fuelType: VehicleFuelType, silent = false) {
+    if (!date) return
+    getFuelPriceForDate(date, fuelType).then((res) => {
+      if ('error' in res) {
+        if (!silent) setError(res.error)
+        return
+      }
+      patchVisit(rowId, idx, {
+        fuelPrice: res.data.price.toLocaleString('ko-KR'),
+        fuelPriceDate: res.data.date,
+      })
+    })
   }
 
   const grandTotal = rows.reduce((s, r) => s + rowTotal(r), 0)
@@ -278,14 +294,27 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
                           return (
                             <tr key={idx}>
                               <td className="py-1 pr-2">
-                                <input type="date" value={v.date} onChange={(e) => patchVisit(r.id, idx, { date: e.target.value })}
+                                <input type="date" value={v.date}
+                                  onChange={(e) => {
+                                    const d = e.target.value
+                                    patchVisit(r.id, idx, { date: d })
+                                    // 방문일 선택 시 해당일 오피넷 유가 자동 채움 (실패는 조용히 — 수기 입력 가능)
+                                    autoFuelPrice(r.id, idx, d, r.fuelType, true)
+                                  }}
                                   className="rounded border border-gray-300 px-1.5 py-1 text-xs focus:border-blue-500 focus:outline-none" />
                               </td>
-                              <td className="py-1 w-24">
-                                <input type="text" inputMode="numeric" value={v.fuelPrice}
-                                  onChange={(e) => { const x = e.target.value.replace(/[^0-9]/g, ''); patchVisit(r.id, idx, { fuelPrice: x ? parseInt(x).toLocaleString('ko-KR') : '' }) }}
-                                  placeholder="1,650"
-                                  className="w-full rounded border border-gray-300 px-1.5 py-1 text-right text-xs focus:border-blue-500 focus:outline-none" />
+                              <td className="py-1 w-32">
+                                <div className="flex gap-0.5">
+                                  <input type="text" inputMode="numeric" value={v.fuelPrice}
+                                    onChange={(e) => { const x = e.target.value.replace(/[^0-9]/g, ''); patchVisit(r.id, idx, { fuelPrice: x ? parseInt(x).toLocaleString('ko-KR') : '' }) }}
+                                    placeholder="1,650"
+                                    className="w-full rounded border border-gray-300 px-1.5 py-1 text-right text-xs focus:border-blue-500 focus:outline-none" />
+                                  <button type="button" onClick={() => autoFuelPrice(r.id, idx, v.date, r.fuelType)}
+                                    title="방문일 기준 오피넷 유가 자동조회"
+                                    className="whitespace-nowrap rounded border border-green-300 bg-white px-1.5 py-1 text-xs text-green-700 hover:bg-green-50">
+                                    자동
+                                  </button>
+                                </div>
                               </td>
                               <td className="py-1 pl-2">
                                 <input type="date" value={v.fuelPriceDate} onChange={(e) => patchVisit(r.id, idx, { fuelPriceDate: e.target.value })}
