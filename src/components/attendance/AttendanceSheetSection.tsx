@@ -119,22 +119,22 @@ export function AttendanceSheetSection({
         return
       }
       const byName = (name: string) => persons.find((p) => p.name === name)
+      // 인식 결과 매칭은 상태 업데이트 함수 밖에서 계산한다 —
+      // updater 안에서 채우면 React가 나중에 실행해 안내 문구가 빈 결과로 잘못 뜬다
       if ('workDays' in result && result.workDays) {
+        const updates: Record<string, string> = {}
         const matched: string[] = []
-        setWorkDays((prev) => {
-          const next = { ...prev }
-          for (const [name, byMonth] of Object.entries(result.workDays)) {
-            const p = byName(name)
-            if (!p) continue
-            // 월별 인식값을 합산해 기성기간 합계로 채운다
-            const total = Object.entries(byMonth)
-              .filter(([ym]) => months.includes(ym))
-              .reduce((s, [, days]) => s + days, 0)
-            next[p.key] = String(total)
-            matched.push(`${name} 합계 ${total}일`)
-          }
-          return next
-        })
+        for (const [name, byMonth] of Object.entries(result.workDays)) {
+          const p = byName(name)
+          if (!p) continue
+          // 월별 인식값을 합산해 기성기간 합계로 채운다
+          const total = Object.entries(byMonth)
+            .filter(([ym]) => months.includes(ym))
+            .reduce((s, [, days]) => s + days, 0)
+          updates[p.key] = String(total)
+          matched.push(`${name} 합계 ${total}일`)
+        }
+        if (matched.length > 0) setWorkDays((prev) => ({ ...prev, ...updates }))
         setParseNotice(
           matched.length > 0
             ? { kind: 'ok', text: `출근부에서 자동 인식: ${matched.join(', ')} — 확인 후 저장하세요.` }
@@ -142,18 +142,16 @@ export function AttendanceSheetSection({
         )
       }
       if ('visitDates' in result && result.visitDates) {
+        const updates: Record<string, string[]> = {}
         const matched: string[] = []
-        setVisitDates((prev) => {
-          const next = { ...prev }
-          for (const [name, dates] of Object.entries(result.visitDates)) {
-            const p = byName(name)
-            if (p) {
-              next[p.key] = dates
-              matched.push(`${name} ${dates.length}일`)
-            }
+        for (const [name, dates] of Object.entries(result.visitDates)) {
+          const p = byName(name)
+          if (p) {
+            updates[p.key] = dates
+            matched.push(`${name} ${dates.length}일`)
           }
-          return next
-        })
+        }
+        if (matched.length > 0) setVisitDates((prev) => ({ ...prev, ...updates }))
         setParseNotice(
           matched.length > 0
             ? { kind: 'ok', text: `출근부에서 방문일 자동 인식: ${matched.join(', ')} — 확인 후 저장하세요.` }

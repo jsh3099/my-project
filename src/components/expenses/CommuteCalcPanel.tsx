@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { calcCommuteCost, saveMyTransportInfo } from '@/actions/commute'
+import { updateSiteAddress } from '@/actions/sites'
 import { getFuelPriceForDate } from '@/actions/fuelPrice'
 import { calcCommute } from '@/lib/settlement'
 import { VEHICLE_FUEL_TYPE_LABELS, FUEL_EFFICIENCY, type VehicleFuelType } from '@/lib/constants'
@@ -20,6 +22,7 @@ export interface CommuteApplyParams {
 }
 
 interface Props {
+  siteId: string
   siteAddress: string
   isOwnRow: boolean
   defaultHomeAddress?: string | null
@@ -31,8 +34,15 @@ function formatKRW(n: number) {
   return n.toLocaleString('ko-KR') + '원'
 }
 
-export function CommuteCalcPanel({ siteAddress, isOwnRow, defaultHomeAddress, defaultFuelType, onApply }: Props) {
+export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAddress, defaultFuelType, onApply }: Props) {
+  const router = useRouter()
   const [homeAddress, setHomeAddress] = useState(defaultHomeAddress ?? '')
+  // 현장주소 — 현장 등록 정보(sites.address)가 기본값이고, 여기서 고쳐 저장하면 다음부터 자동 입력
+  const [siteAddr, setSiteAddr] = useState(siteAddress)
+  const [siteAddrSaved, setSiteAddrSaved] = useState(false)
+  // 고속도로 우선(시간 우선 경로) — 추천 경로가 무료도로면 통행료가 0으로 나오므로,
+  // 실제로 고속도로로 다니는 인원은 이 옵션으로 거리·통행료를 산출한다
+  const [highwayFirst, setHighwayFirst] = useState(true)
   const [fuelType, setFuelType] = useState<VehicleFuelType>((defaultFuelType as VehicleFuelType) ?? 'gasoline')
   const [fuelPrice, setFuelPrice] = useState('')
   const [fuelPriceDate, setFuelPriceDate] = useState('')
@@ -55,13 +65,14 @@ export function CommuteCalcPanel({ siteAddress, isOwnRow, defaultHomeAddress, de
   // 카카오 길찾기 경로 자동조회 (KAKAO_REST_API_KEY 설정 시 동작 — 실패 시 수동입력 안내)
   function handleAutoRoute() {
     setError('')
-    if (!siteAddress) { setError('현장 주소가 등록되어 있지 않습니다. 거리를 직접 입력하세요.'); return }
+    if (!siteAddr) { setError('현장주소를 입력하세요.'); return }
     if (!homeAddress) { setError('자택주소를 입력하세요.'); return }
     const formData = new FormData()
     formData.set('home_address', homeAddress)
-    formData.set('site_address', siteAddress)
+    formData.set('site_address', siteAddr)
     formData.set('fuel_type', fuelType)
     formData.set('fuel_price', fuelPrice.replace(/,/g, '') || '1')
+    formData.set('route_priority', highwayFirst ? 'TIME' : 'RECOMMEND')
     startTransition(async () => {
       const res = await calcCommuteCost(formData)
       if ('error' in res) {
@@ -103,6 +114,23 @@ export function CommuteCalcPanel({ siteAddress, isOwnRow, defaultHomeAddress, de
     })
   }
 
+  // 현장주소 저장 — sites.address로 남아 모든 인원·다음 방문에서 자동 입력된다
+  function handleSaveSiteAddress() {
+    setError('')
+    const fd = new FormData()
+    fd.set('address', siteAddr)
+    startTransition(async () => {
+      const res = await updateSiteAddress(siteId, fd)
+      if ('error' in res) {
+        setError(res.error)
+      } else {
+        setSiteAddrSaved(true)
+        setTimeout(() => setSiteAddrSaved(false), 2000)
+        router.refresh()
+      }
+    })
+  }
+
   function handleSaveMyInfo() {
     const formData = new FormData()
     formData.set('home_address', homeAddress)
@@ -130,8 +158,21 @@ export function CommuteCalcPanel({ siteAddress, isOwnRow, defaultHomeAddress, de
         </div>
         <div>
           <label className="mb-0.5 block text-xs text-gray-500">현장주소</label>
-          <input type="text" value={siteAddress} readOnly
-            className="w-full rounded border border-gray-200 bg-gray-100 px-2 py-1.5 text-sm text-gray-500" />
+          <div className="flex gap-1">
+            <input
+              type="text" value={siteAddr} onChange={(e) => setSiteAddr(e.target.value)}
+              placeholder="예: 충북 청주시 상당구 ○○로 123"
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+            />
+            {siteAddr.trim() && siteAddr !== siteAddress && (
+              <button type="button" onClick={handleSaveSiteAddress} disabled={isPending}
+                title="현장주소로 저장 — 다음부터 모든 인원에게 자동 입력됩니다"
+                className="whitespace-nowrap rounded border border-green-300 bg-white px-2 py-1.5 text-xs text-green-700 hover:bg-green-50 disabled:opacity-50">
+                {isPending ? '…' : '저장'}
+              </button>
+            )}
+            {siteAddrSaved && <span className="self-center whitespace-nowrap text-xs text-green-700">✓</span>}
+          </div>
         </div>
         <div>
           <label className="mb-0.5 block text-xs text-gray-500">편도거리 (km)</label>
@@ -189,6 +230,16 @@ export function CommuteCalcPanel({ siteAddress, isOwnRow, defaultHomeAddress, de
           />
         </div>
       </div>
+
+      <label className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-gray-600">
+        <input
+          type="checkbox"
+          checked={highwayFirst}
+          onChange={(e) => setHighwayFirst(e.target.checked)}
+          className="h-3.5 w-3.5 rounded border-gray-300"
+        />
+        🛣 고속도로 우선 경로로 조회 (시간 우선 — 통행료 포함 경로 기준, 해제 시 카카오 추천 경로)
+      </label>
 
       {isOwnRow && (
         <button type="button" onClick={handleSaveMyInfo}

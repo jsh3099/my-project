@@ -8,6 +8,7 @@ import { calcWorkDays } from '@/lib/korean-holidays'
 import { SPECIALTIES, COMMUTE_MODE_LABELS, type CommuteMode } from '@/lib/constants'
 import { applyVatExclusion, convertJeonseToMonthly } from '@/lib/settlement'
 import { CommuteCalcPanel, type CommuteApplyParams } from './CommuteCalcPanel'
+import { parseReceiptAmounts } from '@/actions/receiptParse'
 
 interface Props {
   siteId: string
@@ -28,7 +29,6 @@ interface Props {
 }
 
 const ACCEPT = '.jpg,.jpeg,.png,.pdf'
-const MAX_FILES = 5
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
 
 function parseNum(v: string) { return parseInt(v.replace(/,/g, ''), 10) || 0 }
@@ -53,6 +53,16 @@ const CATEGORY_COLORS: Record<ReceiptCategory, string> = {
   '관리비':    'bg-orange-100 text-orange-700',
   '식비':      'bg-green-100 text-green-700',
   '교통비':    'bg-blue-100 text-blue-700',
+}
+
+// 파일명에서 비목 자동 인식 (일괄 업로드 자동 분류) — 관리비 키워드를 먼저 본다
+// ("관리비_납입확인서"가 이체·숙소 키워드와 겹치지 않도록)
+function detectCategory(filename: string): ReceiptCategory | null {
+  if (/관리비|전기|가스|납입확인/.test(filename)) return '관리비'
+  if (/숙소|임대|월세|이체확인/.test(filename)) return '숙소임대비'
+  if (/식비|식대/.test(filename)) return '식비'
+  if (/유류|주유|통행료|하이패스|교통/.test(filename)) return '교통비'
+  return null
 }
 // 영수증 비목 라벨 → expenses.subcategory 값 매핑 (서버 액션에 전달할 때 사용)
 const CATEGORY_TO_SUBCATEGORY: Record<ReceiptCategory, string> = {
@@ -118,7 +128,7 @@ function deriveRow(r: Row, mealDailyLimit: number) {
 let extraIdSeq = 0
 
 // ── 영수증 패널 ─────────────────────────────────────────────
-function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (files: AttachedFile[]) => void }) {
+function ReceiptPanel({ files, onChange, maxFiles, notice }: { files: AttachedFile[]; onChange: (files: AttachedFile[]) => void; maxFiles: number; notice?: { kind: 'ok' | 'warn'; text: string } | null }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<ReceiptCategory>('숙소임대비')
@@ -127,10 +137,11 @@ function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (f
     if (!incoming) return
     const valid: AttachedFile[] = []
     for (const f of Array.from(incoming)) {
-      if (files.length + valid.length >= MAX_FILES) break
+      if (files.length + valid.length >= maxFiles) break
       if (f.size > MAX_SIZE) { alert(`${f.name}: 파일 크기는 10MB 이하만 가능합니다.`); continue }
       const preview = f.type.startsWith('image/') ? URL.createObjectURL(f) : null
-      valid.push({ file: f, preview, category: selectedCategory })
+      // 파일명에서 비목이 읽히면 그것을, 아니면 위에서 선택한 비목을 쓴다
+      valid.push({ file: f, preview, category: detectCategory(f.name) ?? selectedCategory })
     }
     if (valid.length) onChange([...files, ...valid])
   }
@@ -165,7 +176,7 @@ function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (f
         </div>
       </div>
 
-      {files.length < MAX_FILES && (
+      {files.length < maxFiles && (
         <div
           onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
           onDragLeave={() => setDragging(false)}
@@ -209,7 +220,13 @@ function ReceiptPanel({ files, onChange }: { files: AttachedFile[]; onChange: (f
         </div>
       )}
 
-      <p className="text-xs text-gray-400">최대 {MAX_FILES}개 · JPG·PNG·PDF · 10MB 이하</p>
+      {notice && (
+        <p className={`text-xs ${notice.kind === 'ok' ? 'text-green-700' : 'text-amber-600'}`}>
+          {notice.kind === 'ok' ? '✓ ' : '⚠ '}
+          {notice.text}
+        </p>
+      )}
+      <p className="text-xs text-gray-400">최대 {maxFiles}개 · JPG·PNG·PDF · 10MB 이하 · 파일명에 항목(숙소비·관리비 등)이 있으면 자동 분류 · 이체확인증·관리비 PDF는 금액 자동 인식</p>
     </div>
   )
 }
@@ -369,14 +386,76 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
   }
 
   const [receipts, setReceipts] = useState<Record<string, AttachedFile[]>>({})
+  // 인원당 첨부 한도 — 기성기간 개월수에 비례 (개월수 × 4 + 여유, 최소 30)
+  const periodMonths =
+    defaultPeriodStart && defaultPeriodEnd
+      ? Math.max(
+          1,
+          (parseInt(defaultPeriodEnd.slice(0, 4), 10) * 12 + parseInt(defaultPeriodEnd.slice(5, 7), 10)) -
+            (parseInt(defaultPeriodStart.slice(0, 4), 10) * 12 + parseInt(defaultPeriodStart.slice(5, 7), 10)) +
+            1,
+        )
+      : 1
+  const maxFiles = Math.max(30, periodMonths * 4 + 10)
   // 행별 패널 열림 상태: receipt | commute | maint | lodging
   const [openPanel, setOpenPanel] = useState<Record<string, string | null>>({})
   function togglePanel(id: string, panel: string) {
     setOpenPanel((p) => ({ ...p, [id]: p[id] === panel ? null : panel }))
   }
 
+  // 행별 영수증 자동 인식 결과 안내 (저장 버튼과 분리된 트랜지션)
+  const [receiptNotice, setReceiptNotice] = useState<Record<string, { kind: 'ok' | 'warn'; text: string } | null>>({})
+  const [, startReceiptTransition] = useTransition()
+
   function setRowReceipts(id: string, files: AttachedFile[]) {
+    const prev = receipts[id] ?? []
     setReceipts((p) => ({ ...p, [id]: files }))
+    // 새로 추가된 PDF는 금액 자동 인식 (제거만 한 경우는 건너뜀)
+    const added = files.filter(
+      (f) => !prev.includes(f) && (f.file.type === 'application/pdf' || f.file.name.toLowerCase().endsWith('.pdf')),
+    )
+    if (added.length > 0) autoFillFromReceipts(id, added)
+  }
+
+  // 첨부 PDF에서 숙소임대비(이체금액 합산)·관리비(전기·가스 건별)를 읽어 해당 칸을 채운다.
+  // 인식값은 제안 — 사용자가 확인·수정 후 임시저장으로 확정한다.
+  function autoFillFromReceipts(id: string, added: AttachedFile[]) {
+    const isExtra = id.startsWith('extra_')
+    const fd = new FormData()
+    for (const a of added) fd.append('files', a.file)
+    startReceiptTransition(async () => {
+      const result = await parseReceiptAmounts(fd)
+      if ('error' in result) {
+        setReceiptNotice((p) => ({ ...p, [id]: { kind: 'warn', text: result.error } }))
+        return
+      }
+      const filled: string[] = []
+      if (result.rentTotal > 0) {
+        patchRow(id, isExtra, {
+          lodgingContract: 'monthly',
+          lodgingRent: result.rentTotal.toLocaleString('ko-KR'),
+        })
+        filled.push(`숙소임대비 ${result.rentTotal.toLocaleString('ko-KR')}원`)
+      }
+      if (result.maintItems.length > 0) {
+        const existing = getRow(id, isExtra)?.maintItems ?? []
+        const newItems = result.maintItems
+          .filter((it) => !existing.some((e) => e.date === it.date && e.tag === it.tag))
+          .map((it) => ({ date: it.date, tag: it.tag, amountGross: it.amountGross.toLocaleString('ko-KR') }))
+        if (newItems.length > 0) {
+          patchRow(id, isExtra, { maintItems: [...existing, ...newItems] })
+          const gross = result.maintItems.reduce((s, it) => s + it.amountGross, 0)
+          filled.push(`관리비 ${newItems.length}건 (합계 ${gross.toLocaleString('ko-KR')}원, VAT 제외 후 인정)`)
+        }
+      }
+      setReceiptNotice((p) => ({
+        ...p,
+        [id]:
+          filled.length > 0
+            ? { kind: 'ok', text: `영수증에서 자동 인식: ${filled.join(' · ')} — 확인 후 저장하세요.` }
+            : { kind: 'warn', text: '첨부에서 금액을 찾지 못했습니다. 직접 입력하세요.' },
+      }))
+    })
   }
 
   function getRow(id: string, isExtra: boolean): Row | undefined {
@@ -522,7 +601,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
           </div>
         </td>
         <td className="px-3 py-2 text-center">
-          <input type="number" min={0} max={62} value={r.workDays} onChange={(e) => patch({ workDays: e.target.value })}
+          <input type="number" min={0} max={999} value={r.workDays} onChange={(e) => patch({ workDays: e.target.value })}
             className="w-14 rounded border border-gray-300 px-2 py-1.5 text-center text-sm focus:border-blue-500 focus:outline-none" />
         </td>
         <td className="px-3 py-2">
@@ -614,10 +693,11 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
       <tr>
         <td colSpan={12} className="p-0">
           {panel === 'receipt' && (
-            <ReceiptPanel files={receipts[id] ?? []} onChange={(files) => setRowReceipts(id, files)} />
+            <ReceiptPanel files={receipts[id] ?? []} onChange={(files) => setRowReceipts(id, files)} maxFiles={maxFiles} notice={receiptNotice[id]} />
           )}
           {panel === 'commute' && (
             <CommuteCalcPanel
+              siteId={siteId}
               siteAddress={siteAddress ?? ''}
               isOwnRow={id === myUserId}
               defaultHomeAddress={id === myUserId ? myHomeAddress : undefined}

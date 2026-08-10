@@ -33,8 +33,15 @@ export type DrivingRoute = {
   tollFare: number
 }
 
-export async function getDrivingRoute(from: GeoPoint, to: GeoPoint): Promise<DrivingRoute> {
-  const url = `${DIRECTIONS_URL}?origin=${from.lng},${from.lat}&destination=${to.lng},${to.lat}`
+// 경로 우선순위 — RECOMMEND(추천, 무료도로 위주일 수 있음) / TIME(시간 우선 = 고속도로 경로) / DISTANCE(최단거리)
+export type RoutePriority = 'RECOMMEND' | 'TIME' | 'DISTANCE'
+
+export async function getDrivingRoute(
+  from: GeoPoint,
+  to: GeoPoint,
+  priority: RoutePriority = 'RECOMMEND',
+): Promise<DrivingRoute> {
+  const url = `${DIRECTIONS_URL}?origin=${from.lng},${from.lat}&destination=${to.lng},${to.lat}&priority=${priority}`
   const res = await fetch(url, { headers: authHeaders() })
   if (!res.ok) throw new Error(`경로 조회 실패 (${res.status})`)
   const data = await res.json()

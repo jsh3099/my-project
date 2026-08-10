@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { siteSchema } from '@/lib/validations/site'
 import { EXPENSE_CATEGORY_LABELS, type ExpenseCategory } from '@/lib/constants'
 
@@ -31,6 +32,44 @@ async function saveBudgetItems(
       { onConflict: 'site_id,category' },
     )
   return error
+}
+
+// 현장주소 저장 — 자차 산출 패널에서 현장 담당자가 직접 기재한다.
+// sites UPDATE RLS는 본사·관리자 전용이라, 소속 현장 여부를 확인한 뒤 주소 컬럼만 admin으로 갱신.
+// 한 번 저장하면 sites.address로 남아 모든 인원·다음 방문에서 자동 입력된다.
+export async function updateSiteAddress(
+  siteId: string,
+  formData: FormData,
+): Promise<{ error: string } | { success: true }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '인증이 필요합니다.' }
+
+  const address = ((formData.get('address') as string) ?? '').trim()
+  if (!address) return { error: '현장주소를 입력하세요.' }
+  if (address.length > 200) return { error: '현장주소가 너무 깁니다.' }
+
+  const { data: membership } = await supabase
+    .from('user_site_assignments')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('site_id', siteId)
+    .eq('is_active', true)
+    .maybeSingle()
+  if (!membership) {
+    const { data: me } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+    if (!me || !['hq_officer', 'system_admin'].includes(me.role)) {
+      return { error: '이 현장의 주소를 수정할 권한이 없습니다.' }
+    }
+  }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('sites').update({ address }).eq('id', siteId)
+  if (error) return { error: '현장주소 저장에 실패했습니다: ' + error.message }
+
+  revalidatePath('/expenses/staff-costs/resident')
+  revalidatePath('/expenses/staff-costs/support')
+  return { success: true }
 }
 
 export async function createSite(formData: FormData) {

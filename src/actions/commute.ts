@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { geocodeAddress, getDrivingRoute } from '@/lib/kakaoMaps'
+import { geocodeAddress, getDrivingRoute, type RoutePriority } from '@/lib/kakaoMaps'
 import { FUEL_EFFICIENCY, type VehicleFuelType } from '@/lib/constants'
 
 export async function saveMyTransportInfo(formData: FormData) {
@@ -38,6 +38,11 @@ export async function calcCommuteCost(formData: FormData): Promise<{ error: stri
   const siteAddress = formData.get('site_address') as string
   const fuelType = formData.get('fuel_type') as VehicleFuelType
   const fuelPrice = Number(formData.get('fuel_price'))
+  // 경로 우선순위 — TIME(시간 우선)이면 고속도로 경로 기준으로 거리·통행료 산출
+  const rawPriority = formData.get('route_priority') as string
+  const priority: RoutePriority = ['RECOMMEND', 'TIME', 'DISTANCE'].includes(rawPriority)
+    ? (rawPriority as RoutePriority)
+    : 'RECOMMEND'
 
   if (!homeAddress || !siteAddress) return { error: '자택주소와 현장주소가 모두 필요합니다.' }
   if (!FUEL_EFFICIENCY[fuelType]) return { error: '차종을 선택하세요.' }
@@ -45,7 +50,7 @@ export async function calcCommuteCost(formData: FormData): Promise<{ error: stri
 
   try {
     const [home, site] = await Promise.all([geocodeAddress(homeAddress), geocodeAddress(siteAddress)])
-    const route = await getDrivingRoute(home, site)
+    const route = await getDrivingRoute(home, site, priority)
 
     const distanceRoundTripKm = route.distanceKm * 2
     const tollRoundTrip = route.tollFare * 2
