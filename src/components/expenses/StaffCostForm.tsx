@@ -14,7 +14,10 @@ interface Props {
   siteName: string
   yearMonth: string
   members: SiteStaffMember[]   // 현장 기술인 명부 — 정산 인원의 단일 원천 (출근부 화면에서 등록)
-  attendance: AttendanceRecord[]
+  attendance: AttendanceRecord[] // 회차 기준 집계 — work_days는 기성기간 출근일수 합계
+  /** 진행 중 회차의 기성기간 — 근무기간 기본값 */
+  defaultPeriodStart?: string | null
+  defaultPeriodEnd?: string | null
   mealDailyLimit?: number
   applyCommuteRegulation?: boolean
   commuteTripsDefault?: number
@@ -83,9 +86,15 @@ type Row = {
 }
 type ExtraRow = Row & { id: string; name: string }
 
-function makeDefaultRow(yearMonth: string, specialty: string, tripsDefault: number): Row {
+function makeDefaultRow(
+  yearMonth: string,
+  specialty: string,
+  tripsDefault: number,
+  periodStart?: string | null,
+  periodEnd?: string | null,
+): Row {
   return {
-    periodStart: `${yearMonth}-01`, periodEnd: '', workDays: '0', specialty,
+    periodStart: periodStart ?? `${yearMonth}-01`, periodEnd: periodEnd ?? '', workDays: '0', specialty,
     lodgingContract: 'monthly', lodgingRent: '', deposit: '', conversionRate: '5.5',
     maintItems: [],
     commuteMode: 'lodging_return', commuteRoundtrip: '', commuteTrips: String(tripsDefault), commuteCalc: null,
@@ -317,7 +326,7 @@ function LodgingPanel({ r, onChange }: { r: Row; onChange: (patch: Partial<Row>)
 // 표에 뜨는 기본 인원: 명부 인원(key=m_{memberId})
 type BasePerson = { key: string; name: string; defaultSpecialty: string | null }
 
-export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance, mealDailyLimit = 25000, applyCommuteRegulation = true, commuteTripsDefault = 4, siteAddress, myUserId, myHomeAddress, myFuelType }: Props) {
+export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance, defaultPeriodStart, defaultPeriodEnd, mealDailyLimit = 25000, applyCommuteRegulation = true, commuteTripsDefault = 4, siteAddress, myUserId, myHomeAddress, myFuelType }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -340,6 +349,8 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
           ? p.defaultSpecialty
           : SPECIALTIES[i % SPECIALTIES.length],
         commuteTripsDefault,
+        defaultPeriodStart,
+        defaultPeriodEnd,
       ),
       workDays: String(attendanceMap[p.key] ?? 0),
     }]))
@@ -373,9 +384,12 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
   }
 
   function patchRow(id: string, isExtra: boolean, patch: Partial<Row>) {
+    // 출근부에 전기된 인원은 근무일수의 원천이 출근부(휴가 등 결근 제외 반영)이므로,
+    // 근무기간을 바꿔도 달력 일수로 덮어쓰지 않는다. 출근부 기록이 없는 인원만 자동 계산.
+    const hasAttendance = !isExtra && attendanceMap[id] != null
     const applyDerived = (r: Row): Row => {
       const updated = { ...r, ...patch }
-      if ('periodStart' in patch || 'periodEnd' in patch) {
+      if (('periodStart' in patch || 'periodEnd' in patch) && !hasAttendance) {
         updated.workDays = String(calcWorkDays(updated.periodStart, updated.periodEnd))
       }
       return updated
@@ -389,7 +403,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
 
   function addRow() {
     const id = `extra_${++extraIdSeq}`
-    setExtraRows((p) => [...p, { id, name: '', ...makeDefaultRow(yearMonth, '건축', commuteTripsDefault) }])
+    setExtraRows((p) => [...p, { id, name: '', ...makeDefaultRow(yearMonth, '건축', commuteTripsDefault, defaultPeriodStart, defaultPeriodEnd) }])
   }
 
   function removeRow(id: string) {

@@ -30,12 +30,22 @@ export function SettlementRoundForm({ nextRoundNo, defaultPeriodStart, action }:
         <div className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
       <p className="text-sm text-gray-500">
-        <span className="font-semibold text-gray-700">{nextRoundNo}회차</span> 정산 대상 기간을 지정하세요.
+        <span className="font-semibold text-gray-700">{nextRoundNo}회차</span> 기성기간을 연·월·일로 지정하세요.
+        (예: 2026-12-01 ~ 2027-05-31)
       </p>
       <div className="grid grid-cols-2 gap-4">
-        <Input label="정산 시작일" name="period_start" type="date" required defaultValue={defaultPeriodStart} />
-        <Input label="정산 종료일" name="period_end" type="date" required />
+        <Input
+          label="기성기간 시작일"
+          name="period_start"
+          type="date"
+          required
+          defaultValue={defaultPeriodStart}
+        />
+        <Input label="기성기간 종료일" name="period_end" type="date" required />
       </div>
+      <p className="-mt-2 text-xs text-gray-500">
+        연도가 넘어가는 회차(예: 12월~다음 해 5월)도 그대로 입력하면 됩니다.
+      </p>
       <div>
         <Input
           label="금회 계상금액 (원, 선택)"

@@ -5,11 +5,31 @@ import { StaffCostForm } from '@/components/expenses/StaffCostForm'
 import { SupportTripForm } from '@/components/expenses/SupportTripForm'
 import type { StaffType } from '@/lib/constants'
 import { STAFF_TYPE_LABELS } from '@/lib/constants'
-import type { Site, Profile, AttendanceRecord, SiteStaffMember } from '@/types'
+import type { Site, Profile, AttendanceRecord, SiteStaffMember, SettlementRound } from '@/types'
 
 function currentYearMonth() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+const pad = (n: number) => String(n).padStart(2, '0')
+
+// 회차 기성기간에 걸치는 연월 목록 (최대 24개월 안전 상한)
+function monthsOfRound(round: SettlementRound): string[] {
+  const months: string[] = []
+  const [sy, sm] = round.period_start.slice(0, 7).split('-').map(Number)
+  const [ey, em] = round.period_end.slice(0, 7).split('-').map(Number)
+  let y = sy
+  let m = sm
+  while ((y < ey || (y === ey && m <= em)) && months.length < 24) {
+    months.push(`${y}-${pad(m)}`)
+    m += 1
+    if (m > 12) {
+      m = 1
+      y += 1
+    }
+  }
+  return months
 }
 
 export async function StaffCostsPageContent({
@@ -49,14 +69,32 @@ export async function StaffCostsPageContent({
   // 정산 인원의 원천은 기술인 명부(site_staff_members) — 로그인 계정은 권한용으로만 쓴다
   const admin = createAdminClient()
 
+  // 진행 중 기성회차 — 출근부가 회차 단위(합계 일수·기간 전체 방문일)로 전기되므로
+  // 주재비·출장비 폼의 프리필도 회차 기준으로 집계한다
+  const { data: openRoundData } = await supabase
+    .from('settlement_rounds')
+    .select('*')
+    .eq('site_id', siteId)
+    .eq('status', 'open')
+    .maybeSingle()
+  const openRound = (openRoundData ?? null) as SettlementRound | null
+  const roundMonths = openRound ? monthsOfRound(openRound) : []
+  const roundYears = [...new Set(roundMonths.map((ym) => parseInt(ym.slice(0, 4), 10)))]
+
   // 출근부 데이터 + 현장 기술인 명부
   const [{ data: attendanceData }, { data: membersData }] = await Promise.all([
-    supabase
-      .from('attendance_records')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('year', parseInt(year, 10))
-      .eq('month', month),
+    openRound
+      ? supabase
+          .from('attendance_records')
+          .select('*')
+          .eq('site_id', siteId)
+          .in('year', roundYears)
+      : supabase
+          .from('attendance_records')
+          .select('*')
+          .eq('site_id', siteId)
+          .eq('year', parseInt(year, 10))
+          .eq('month', month),
     supabase
       .from('site_staff_members')
       .select('*')
@@ -67,7 +105,25 @@ export async function StaffCostsPageContent({
       .order('created_at'),
   ])
 
-  const attendance = (attendanceData ?? []) as AttendanceRecord[]
+  // 회차 기준이면 인원별로 합산(출근일수 합계는 시작 월 레코드에 있고, 방문일은 월별로 흩어져 있다)
+  let attendance = (attendanceData ?? []) as AttendanceRecord[]
+  if (openRound) {
+    const inRound = attendance.filter((r) => roundMonths.includes(`${r.year}-${pad(r.month)}`))
+    const byPerson = new Map<string, AttendanceRecord>()
+    for (const r of inRound) {
+      const key = r.user_id ?? `m_${r.member_id}`
+      const acc = byPerson.get(key)
+      if (!acc) {
+        byPerson.set(key, { ...r, visit_dates: r.visit_dates ? [...r.visit_dates] : null })
+      } else {
+        acc.work_days += r.work_days
+        if (r.visit_dates?.length) {
+          acc.visit_dates = [...(acc.visit_dates ?? []), ...r.visit_dates].sort()
+        }
+      }
+    }
+    attendance = [...byPerson.values()]
+  }
   const members = (membersData ?? []) as SiteStaffMember[]
 
   // 자차 산출 기본값(자택주소·유종)용 본인 프로필
@@ -135,6 +191,8 @@ export async function StaffCostsPageContent({
           yearMonth={yearMonth}
           members={members}
           attendance={attendance}
+          defaultPeriodStart={openRound?.period_start}
+          defaultPeriodEnd={openRound?.period_end}
           mealDailyLimit={siteParams?.meal_allowance_daily_limit ?? 25000}
           applyCommuteRegulation={siteParams?.apply_commute_regulation ?? true}
           commuteTripsDefault={siteParams?.commute_trips_per_month ?? 4}

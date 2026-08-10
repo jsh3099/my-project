@@ -3,7 +3,10 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { ReportDownloadButton } from '@/components/settlement/ReportDownloadButton'
 import { SiteBudgetForm } from '@/components/settlement/SiteBudgetForm'
+import { SettlementRoundForm } from '@/components/sites/SettlementRoundForm'
+import { RoundPeriodEditor } from '@/components/settlement/RoundPeriodEditor'
 import { updateSiteExpenseBudgets } from '@/actions/siteBudgets'
+import { createSettlementRound } from '@/actions/settlementRounds'
 import { calcClaim } from '@/lib/settlement'
 import { EXPENSE_CATEGORY_LABELS, type ExpenseCategory } from '@/lib/constants'
 import type { Site, SettlementRound, SettlementRoundItem } from '@/types'
@@ -12,6 +15,12 @@ const CATEGORY_KEYS = Object.keys(EXPENSE_CATEGORY_LABELS) as ExpenseCategory[]
 
 function formatKRW(n: number) {
   return n.toLocaleString('ko-KR') + '원'
+}
+
+function addDaysISO(dateStr: string, days: number) {
+  const d = new Date(dateStr)
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
 }
 
 export default async function StaffSettlementPage({
@@ -109,6 +118,12 @@ export default async function StaffSettlementPage({
   const budgetShortfall = openRound?.budgeted_amount
     ? openRound.budgeted_amount - claim.usedTotal
     : 0
+
+  // 새 회차 시작 — 증빙(영수증·출근부)을 첨부하는 주체가 현장이므로 현장직원도 회차를 만들 수 있다
+  const lastRound = rounds[rounds.length - 1] ?? null
+  const nextRoundNo = (lastRound?.round_no ?? 0) + 1
+  const defaultPeriodStart = lastRound ? addDaysISO(lastRound.period_end, 1) : site.contract_start
+  const createAction = createSettlementRound.bind(null, siteId)
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -301,9 +316,21 @@ export default async function StaffSettlementPage({
 
       {openRound ? (
         <div className="rounded-lg border border-blue-200 bg-white p-6 space-y-3">
-          <h3 className="text-sm font-semibold text-gray-800">
-            {openRound.round_no}회차 진행 중 — {openRound.period_start} ~ {openRound.period_end}
-          </h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-gray-800">
+              {openRound.round_no}회차 진행 중 — {openRound.period_start} ~ {openRound.period_end}
+            </h3>
+          </div>
+          <RoundPeriodEditor
+            siteId={siteId}
+            round={{
+              id: openRound.id,
+              round_no: openRound.round_no,
+              period_start: openRound.period_start,
+              period_end: openRound.period_end,
+            }}
+            nextRoundNo={openRound.round_no}
+          />
           <div className="space-y-1 text-sm">
             {openRound.budgeted_amount != null && openRound.budgeted_amount > 0 && (
               <div className="flex justify-between text-gray-600">
@@ -340,11 +367,22 @@ export default async function StaffSettlementPage({
           </div>
         </div>
       ) : (
-        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 space-y-3 text-center text-sm text-gray-400">
-          <p>진행 중인 회차가 없습니다. 본사 정산 담당자에게 문의하세요.</p>
-          <div className="flex justify-center gap-2">
-            <ReportDownloadButton siteId={siteId} label="📄 잠정 정산서 엑셀 (미편입 지출)" />
-            <ReportDownloadButton siteId={siteId} label="📄 잠정 정산서 PDF (미편입 지출)" format="pdf" />
+        <div className="space-y-4">
+          {/* 새 회차 시작 — 기성 기간을 월 단위로 지정하고 그 기간의 증빙을 첨부한다 */}
+          <div className="rounded-lg border border-gray-200 bg-white p-6">
+            <h3 className="mb-3 text-sm font-semibold text-gray-800">새 기성회차 시작</h3>
+            <SettlementRoundForm
+              nextRoundNo={nextRoundNo}
+              defaultPeriodStart={defaultPeriodStart}
+              action={createAction}
+            />
+          </div>
+          <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 space-y-3 text-center text-sm text-gray-400">
+            <p>진행 중인 회차가 없습니다. 위에서 회차를 시작하면 출근부·영수증 첨부가 그 기간으로 정리됩니다.</p>
+            <div className="flex justify-center gap-2">
+              <ReportDownloadButton siteId={siteId} label="📄 잠정 정산서 엑셀 (미편입 지출)" />
+              <ReportDownloadButton siteId={siteId} label="📄 잠정 정산서 PDF (미편입 지출)" format="pdf" />
+            </div>
           </div>
         </div>
       )}
