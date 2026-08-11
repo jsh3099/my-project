@@ -1,0 +1,449 @@
+<title>기술지원 출장비 입력 개편 목업</title>
+<style>
+  :root {
+    --bg: #F6F7F9; --surface: #FFFFFF; --surface-2: #EEF1F5;
+    --ink: #1B2330; --ink-2: #5A6577; --ink-3: #98A2B3; --line: #E2E6EC;
+    --primary: #2563EB; --primary-soft: #EAF0FE;
+    --trip: #0F766E; --trip-soft: #E2F3F1;
+    --ok: #15803D; --ok-soft: #E7F5EC;
+    --warn: #B45309; --warn-soft: #FCF1E3;
+    --shadow: 0 1px 2px rgba(20,28,45,.06), 0 4px 16px rgba(20,28,45,.07);
+    --sheet-shadow: -8px 0 32px rgba(20,28,45,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #13161C; --surface: #1B2029; --surface-2: #232935;
+      --ink: #E6EAF1; --ink-2: #9AA5B8; --ink-3: #66718A; --line: #2C3442;
+      --primary: #5B8DF6; --primary-soft: #1D2A45;
+      --trip: #4CC1B5; --trip-soft: #14302D;
+      --ok: #4ADE80; --ok-soft: #16301F;
+      --warn: #F0A860; --warn-soft: #38271135;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+      --sheet-shadow: -8px 0 32px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #13161C; --surface: #1B2029; --surface-2: #232935;
+    --ink: #E6EAF1; --ink-2: #9AA5B8; --ink-3: #66718A; --line: #2C3442;
+    --primary: #5B8DF6; --primary-soft: #1D2A45;
+    --trip: #4CC1B5; --trip-soft: #14302D;
+    --ok: #4ADE80; --ok-soft: #16301F;
+    --warn: #F0A860; --warn-soft: #38271135;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+    --sheet-shadow: -8px 0 32px rgba(0,0,0,.5);
+  }
+  :root[data-theme="light"] {
+    --bg: #F6F7F9; --surface: #FFFFFF; --surface-2: #EEF1F5;
+    --ink: #1B2330; --ink-2: #5A6577; --ink-3: #98A2B3; --line: #E2E6EC;
+    --primary: #2563EB; --primary-soft: #EAF0FE;
+    --trip: #0F766E; --trip-soft: #E2F3F1;
+    --ok: #15803D; --ok-soft: #E7F5EC;
+    --warn: #B45309; --warn-soft: #FCF1E3;
+    --shadow: 0 1px 2px rgba(20,28,45,.06), 0 4px 16px rgba(20,28,45,.07);
+    --sheet-shadow: -8px 0 32px rgba(20,28,45,.18);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", sans-serif;
+    font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  .page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+  .page-head h1 { font-size: 21px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .page-head .sub { color: var(--ink-2); font-size: 13px; margin: 2px 0 0; }
+  .mock-note { font-size: 12px; color: var(--ink-3); background: var(--surface-2); border: 1px dashed var(--line); border-radius: 6px; padding: 4px 10px; }
+
+  .context-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 18px; box-shadow: var(--shadow);
+  }
+  .context-bar .field { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+  .context-bar .field .lb { color: var(--ink-3); font-size: 12px; }
+  .fake-select {
+    border: 1px solid var(--line); background: var(--surface); border-radius: 7px;
+    padding: 5px 26px 5px 10px; font-size: 13px; position: relative; color: var(--ink);
+  }
+  .fake-select::after { content: "▾"; position: absolute; right: 9px; color: var(--ink-3); font-size: 11px; }
+  .context-bar .spacer { flex: 1; }
+  .total-pill { background: var(--primary-soft); color: var(--primary); font-weight: 700; border-radius: 999px; padding: 5px 14px; font-size: 13.5px; }
+
+  .chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 2px 9px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .chip.spec { background: var(--surface-2); color: var(--ink-2); }
+  .chip.trip { background: var(--trip-soft); color: var(--trip); }
+  .chip.ok { background: var(--ok-soft); color: var(--ok); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.auto { background: var(--primary-soft); color: var(--primary); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* ── 인원 카드 ── */
+  .person-card {
+    background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--trip);
+    border-radius: 12px; box-shadow: var(--shadow); margin-bottom: 14px; overflow: hidden;
+  }
+  .card-head {
+    display: flex; align-items: center; gap: 12px; padding: 14px 18px;
+    width: 100%; background: none; border: none; text-align: left; color: inherit;
+  }
+  .card-head:hover { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
+  .card-head .name { font-size: 15.5px; font-weight: 700; }
+  .card-head .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .card-head .grow { flex: 1; }
+  .card-head .subtotal { text-align: right; }
+  .card-head .subtotal .amt { font-size: 16px; font-weight: 700; }
+  .card-head .subtotal .cap { font-size: 11px; color: var(--ink-3); }
+  .chev { color: var(--ink-3); transition: transform .18s ease; font-size: 12px; }
+  .person-card.open .chev { transform: rotate(180deg); }
+  @media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
+  .card-body { display: none; border-top: 1px solid var(--line); }
+  .person-card.open .card-body { display: block; }
+
+  /* 출장 조건 바 — 출발지·편도거리·차종은 인원당 한 번만 */
+  .trip-config {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px;
+    background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+    padding: 10px 18px; font-size: 12.5px; color: var(--ink-2);
+    border-bottom: 1px solid var(--line);
+  }
+  .trip-config .fld { display: flex; align-items: center; gap: 7px; }
+  .trip-config .lb { color: var(--ink-3); font-size: 11.5px; }
+  .trip-config input[type="text"] {
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12.5px;
+    background: var(--surface); color: var(--ink); width: 220px;
+  }
+  .trip-config .km { font-weight: 700; color: var(--ink); }
+  .trip-config a { color: var(--primary); font-weight: 600; text-decoration: none; font-size: 12px; }
+  .trip-config a:hover { text-decoration: underline; }
+
+  /* 방문일 목록 */
+  .visit-list { padding: 6px 0 2px; }
+  .month-label {
+    padding: 8px 18px 4px; font-size: 11.5px; font-weight: 700; color: var(--ink-3); letter-spacing: .03em;
+  }
+  .visit-row {
+    display: grid; grid-template-columns: 150px repeat(4, 1fr) 110px 34px;
+    align-items: center; gap: 8px; padding: 7px 18px;
+    border-top: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+    font-size: 13px;
+  }
+  .visit-row:hover { background: color-mix(in srgb, var(--surface-2) 40%, transparent); }
+  .visit-row .date { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+  .visit-row .cell { text-align: right; }
+  .visit-row .cell .v { font-weight: 600; }
+  .visit-row .cell .u { display: block; font-size: 10.5px; color: var(--ink-3); }
+  .visit-row .sum { text-align: right; font-weight: 700; }
+  .visit-row .x { border: none; background: none; color: var(--ink-3); font-size: 13px; border-radius: 5px; padding: 3px; }
+  .visit-row .x:hover { color: #D14; background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+  .visit-head {
+    display: grid; grid-template-columns: 150px repeat(4, 1fr) 110px 34px;
+    gap: 8px; padding: 6px 18px 2px; font-size: 10.5px; color: var(--ink-3); font-weight: 600;
+  }
+  .visit-head .r { text-align: right; }
+  .visit-row .date a { color: inherit; text-decoration: none; }
+  .visit-row .date a:hover { color: var(--primary); }
+
+  .card-foot {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 35%, var(--surface));
+    padding: 10px 18px;
+  }
+  .add-visit {
+    border: 1px dashed var(--line); background: none; color: var(--ink-2);
+    border-radius: 7px; padding: 4px 12px; font-size: 12.5px; font-weight: 600;
+  }
+  .add-visit:hover { border-color: var(--primary); color: var(--primary); }
+  .file-chip {
+    display: inline-flex; align-items: center; gap: 6px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 7px; padding: 3px 8px; font-size: 12px;
+  }
+  .file-chip .cat { width: 8px; height: 8px; border-radius: 2px; background: var(--trip); }
+  .file-chip .x { color: var(--ink-3); border: none; background: none; padding: 0 1px; font-size: 12px; }
+  .foot-lb { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+
+  .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+  .btn { border-radius: 9px; padding: 10px 22px; font-size: 14px; font-weight: 600; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.06); }
+
+  /* ── 우측 시트: 방문일 산출 근거 ── */
+  .sheet-backdrop { position: fixed; inset: 0; background: rgba(9,13,20,.42); opacity: 0; pointer-events: none; transition: opacity .18s ease; z-index: 40; }
+  .sheet {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(430px, 92vw);
+    background: var(--surface); box-shadow: var(--sheet-shadow); z-index: 41;
+    transform: translateX(103%); transition: transform .22s ease; display: flex; flex-direction: column;
+  }
+  body.sheet-open .sheet-backdrop { opacity: 1; pointer-events: auto; }
+  body.sheet-open .sheet { transform: none; }
+  @media (prefers-reduced-motion: reduce) { .sheet, .sheet-backdrop { transition: none; } }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px 12px; border-bottom: 1px solid var(--line); }
+  .sheet-head h2 { font-size: 15.5px; margin: 0; }
+  .sheet-head .who { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+  .sheet-close { border: none; background: var(--surface-2); border-radius: 7px; width: 30px; height: 30px; color: var(--ink-2); font-size: 14px; }
+  .sheet-body { flex: 1; overflow-y: auto; padding: 16px 20px; display: grid; gap: 14px; align-content: start; }
+  .calc-block { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .calc-block h3 { margin: 0 0 8px; font-size: 12.5px; color: var(--ink-2); display: flex; align-items: center; justify-content: space-between; }
+  .calc-line { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+  .calc-line .k { color: var(--ink-2); }
+  .calc-line .v { font-weight: 600; }
+  .calc-formula { margin-top: 8px; background: var(--surface-2); border-radius: 7px; padding: 8px 10px; font-size: 12px; color: var(--ink-2); }
+  .calc-formula b { color: var(--trip); font-size: 13px; }
+  .sheet-foot { padding: 14px 20px; border-top: 1px solid var(--line); display: flex; gap: 10px; }
+  .sheet-foot .btn { flex: 1; text-align: center; }
+
+  /* 구현 노트 */
+  .notes { margin-top: 34px; }
+  .notes h2 { font-size: 16px; margin: 0 0 12px; }
+  .note-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  .note-card h3 { margin: 0 0 8px; font-size: 14.5px; }
+  .note-card ul { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; display: grid; gap: 5px; }
+  .note-card li b { color: var(--ink); font-weight: 600; }
+
+  @media (max-width: 760px) {
+    .visit-head { display: none; }
+    .visit-row { grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+    .visit-row .sum { grid-column: 2; }
+  }
+</style>
+
+<div class="wrap">
+  <div class="page-head">
+    <div>
+      <h1>기술지원 기술인 출장비 입력 — 개편 목업</h1>
+      <p class="sub">정산서 2-1 · 다음 구현 대상 · 주재비 카드와 같은 패턴 (카드 1장 = 사람 1명, 우측 시트)</p>
+    </div>
+    <span class="mock-note">클릭 가능한 목업 — 저장되지 않습니다</span>
+  </div>
+
+  <div class="context-bar">
+    <div class="field"><span class="lb">현장</span><span class="fake-select">도매시장 5회차</span></div>
+    <div class="field"><span class="lb">기성회차</span><span class="fake-select">5회차 (진행 중)</span></div>
+    <div class="spacer"></div>
+    <span class="total-pill num">합계 1,448,450원</span>
+  </div>
+
+  <!-- 류익선 -->
+  <article class="person-card open">
+    <button class="card-head" data-toggle aria-expanded="true">
+      <span class="name">류익선</span>
+      <span class="meta">
+        <span class="chip spec">건축</span>
+        <span class="chip trip"><span class="dot"></span>출장 10회</span>
+        <span class="chip ok"><span class="dot"></span>출근부 연동</span>
+      </span>
+      <span class="grow"></span>
+      <span class="subtotal">
+        <div class="amt num">767,210원</div>
+        <div class="cap">이번 회차 소계</div>
+      </span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="card-body">
+      <div class="trip-config">
+        <div class="fld"><span class="lb">출발지</span><input type="text" value="서울특별시 용산구 한강대로 100 (자택)" readonly></div>
+        <div class="fld"><span class="lb">편도</span><span class="km num">62.1km</span><a href="#" data-open-sheet>🚗 경로·유가 산출 근거</a></div>
+        <div class="fld"><span class="lb">차종</span><span class="fake-select">휘발유 (11.97km/L)</span></div>
+      </div>
+
+      <div class="visit-list num">
+        <div class="visit-head">
+          <span>방문일</span><span class="r">유가 (오피넷)</span><span class="r">왕복유류비</span><span class="r">통행료</span><span class="r">일비+식비</span><span class="r">소계</span><span></span>
+        </div>
+
+        <div class="month-label">2026-04</div>
+        <div class="visit-row">
+          <span class="date"><a href="#" data-open-sheet>04-14 (화)</a> <span class="chip auto">자동</span></span>
+          <span class="cell"><span class="v">1,642</span><span class="u">원/L</span></span>
+          <span class="cell"><span class="v">17,038</span></span>
+          <span class="cell"><span class="v">9,600</span></span>
+          <span class="cell"><span class="v">50,000</span><span class="u">25,000 + 25,000</span></span>
+          <span class="sum">76,638</span>
+          <button class="x" aria-label="방문일 삭제">✕</button>
+        </div>
+        <div class="visit-row">
+          <span class="date"><a href="#" data-open-sheet>04-28 (화)</a> <span class="chip auto">자동</span></span>
+          <span class="cell"><span class="v">1,650</span><span class="u">원/L</span></span>
+          <span class="cell"><span class="v">17,121</span></span>
+          <span class="cell"><span class="v">9,600</span></span>
+          <span class="cell"><span class="v">50,000</span></span>
+          <span class="sum">76,721</span>
+          <button class="x" aria-label="방문일 삭제">✕</button>
+        </div>
+
+        <div class="month-label">2026-05</div>
+        <div class="visit-row">
+          <span class="date"><a href="#" data-open-sheet>05-12 (화)</a> <span class="chip auto">자동</span></span>
+          <span class="cell"><span class="v">1,655</span><span class="u">원/L</span></span>
+          <span class="cell"><span class="v">17,173</span></span>
+          <span class="cell"><span class="v">9,600</span></span>
+          <span class="cell"><span class="v">50,000</span></span>
+          <span class="sum">76,773</span>
+          <button class="x" aria-label="방문일 삭제">✕</button>
+        </div>
+        <div class="visit-row">
+          <span class="date"><a href="#" data-open-sheet>05-26 (화)</a> <span class="chip warn">유가 확인</span></span>
+          <span class="cell"><span class="v">—</span><span class="u">미조회</span></span>
+          <span class="cell"><span class="v">—</span></span>
+          <span class="cell"><span class="v">9,600</span></span>
+          <span class="cell"><span class="v">50,000</span></span>
+          <span class="sum">59,600</span>
+          <button class="x" aria-label="방문일 삭제">✕</button>
+        </div>
+
+        <div class="month-label">2026-06 ~ 2026-08 · 6회 <span style="font-weight:400">(생략 — 실화면은 전체 표시)</span></div>
+      </div>
+
+      <div class="card-foot">
+        <button class="add-visit">+ 방문일 추가</button>
+        <span class="foot-lb">증빙 4</span>
+        <span class="file-chip"><span class="cat"></span>테스트_출장유류_류익선.pdf <button class="x" aria-label="첨부 제거">✕</button></span>
+        <span class="file-chip"><span class="cat"></span>테스트_출장통행료_류익선.pdf <button class="x" aria-label="첨부 제거">✕</button></span>
+        <button class="add-visit">+ 영수증 추가 (자동 인식)</button>
+      </div>
+    </div>
+  </article>
+
+  <!-- 장재근 (접힘) -->
+  <article class="person-card">
+    <button class="card-head" data-toggle aria-expanded="false">
+      <span class="name">장재근</span>
+      <span class="meta">
+        <span class="chip spec">토목</span>
+        <span class="chip trip"><span class="dot"></span>출장 10회</span>
+        <span class="chip ok"><span class="dot"></span>출근부 연동</span>
+      </span>
+      <span class="grow"></span>
+      <span class="subtotal">
+        <div class="amt num">681,240원</div>
+        <div class="cap">이번 회차 소계</div>
+      </span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="card-body">
+      <div class="trip-config">
+        <div class="fld"><span class="lb">출발지</span><input type="text" value="경기도 성남시 분당구 판교로 235 (자택)" readonly></div>
+        <div class="fld"><span class="lb">편도</span><span class="km num">48.3km</span><a href="#" data-open-sheet>🚗 경로·유가 산출 근거</a></div>
+        <div class="fld"><span class="lb">차종</span><span class="fake-select">경유 (13.2km/L)</span></div>
+      </div>
+      <div class="visit-list num">
+        <div class="month-label">2026-04</div>
+        <div class="visit-row">
+          <span class="date"><a href="#" data-open-sheet>04-09 (목)</a> <span class="chip auto">자동</span></span>
+          <span class="cell"><span class="v">1,520</span><span class="u">원/L</span></span>
+          <span class="cell"><span class="v">11,124</span></span>
+          <span class="cell"><span class="v">7,000</span></span>
+          <span class="cell"><span class="v">50,000</span></span>
+          <span class="sum">68,124</span>
+          <button class="x" aria-label="방문일 삭제">✕</button>
+        </div>
+        <div class="month-label">2026-04 ~ 2026-08 · 9회 <span style="font-weight:400">(생략)</span></div>
+      </div>
+      <div class="card-foot">
+        <button class="add-visit">+ 방문일 추가</button>
+        <span class="foot-lb">증빙 2</span>
+        <span class="file-chip"><span class="cat"></span>테스트_출장유류_장재근.pdf <button class="x" aria-label="첨부 제거">✕</button></span>
+        <button class="add-visit">+ 영수증 추가 (자동 인식)</button>
+      </div>
+    </div>
+  </article>
+
+  <div class="actions">
+    <button class="btn">취소</button>
+    <button class="btn primary">전체 임시저장</button>
+  </div>
+
+  <!-- 구현 노트 -->
+  <section class="notes">
+    <h2>구현 노트</h2>
+    <div class="note-card">
+      <h3>주재비 카드에서 그대로 가져오는 것</h3>
+      <ul>
+        <li><b>카드 1장 = 사람 1명</b> — 요약 행(이름·직종·방문 횟수·소계) + 접기/펼치기</li>
+        <li><b>우측 시트</b> — 방문일별 산출 근거(경로·유가·계산식)를 시트로. 방문일 날짜 클릭으로 열림</li>
+        <li><b>상태 칩</b> — <span class="chip auto" style="font-size:10.5px">자동</span> 오피넷 유가 조회됨 / <span class="chip warn" style="font-size:10.5px">유가 확인</span> 미조회(과거 날짜 캐시 없음) / <span class="chip ok" style="font-size:10.5px">출근부 연동</span> 방문일이 출근부에서 프리필됨</li>
+        <li><b>증빙 스트립</b> — 유류·통행료 영수증, 첨부 즉시 저장</li>
+      </ul>
+    </div>
+    <div class="note-card">
+      <h3>출장비에서만 다른 것</h3>
+      <ul>
+        <li><b>출발지·편도거리·차종은 조건 바에 한 번만</b> — 방문일마다 반복 입력하지 않는다 (현재 화면은 인원당 1개 폼이라 동일, 유지)</li>
+        <li><b>방문일이 행 단위</b> — 월별 그룹 라벨로 5개월 회차에서도 훑기 쉽게. 행 구성: 방문일 · 유가(오피넷) · 왕복유류비 · 통행료 · 일비+식비(규정 25,000+25,000) · 소계</li>
+        <li><b>유가는 방문일별</b> — 예본 각주 "운행일자의 오피넷 고시 유가 적용" 그대로. 미조회 행은 호박색 칩으로 표시</li>
+        <li>일비·식비는 규정액 고정이라 입력 없음 — 계산 근거만 시트에 표기</li>
+      </ul>
+    </div>
+    <div class="note-card">
+      <h3>그다음 후보 (현장직원용 남은 화면)</h3>
+      <ul>
+        <li><b>현장경비 입력</b> (/expenses/new) — 비목 카드 선택 → 건별 내역 입력. 관리비 내역 패턴 재사용</li>
+        <li><b>출근부</b> — 첨부→자동인식→확인 3단계를 스텝 표시로. 구조는 유지</li>
+        <li>본사담당자용(검토·정산 확정)은 현장직원용 완성 후</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<!-- 우측 시트: 산출 근거 -->
+<div class="sheet-backdrop" data-close-sheet></div>
+<aside class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+  <div class="sheet-head">
+    <div>
+      <h2 id="sheet-title">방문일 산출 근거</h2>
+      <div class="who">류익선 (건축) · 2026-04-14 방문</div>
+    </div>
+    <button class="sheet-close" data-close-sheet aria-label="닫기">✕</button>
+  </div>
+  <div class="sheet-body num">
+    <div class="calc-block">
+      <h3>경로 <span class="chip auto">카카오 · 고속도로 우선</span></h3>
+      <div class="calc-line"><span class="k">출발지 (자택)</span><span class="v">서울 용산구 한강대로 100</span></div>
+      <div class="calc-line"><span class="k">도착지 (현장)</span><span class="v">충북 청주시 청원구 중앙로 91</span></div>
+      <div class="calc-line"><span class="k">편도 거리</span><span class="v">62.1km</span></div>
+      <div class="calc-line"><span class="k">통행료 (왕복)</span><span class="v">9,600원</span></div>
+    </div>
+    <div class="calc-block">
+      <h3>유가 <span class="chip auto">오피넷 2026-04-14</span></h3>
+      <div class="calc-line"><span class="k">유종</span><span class="v">휘발유 (연비 11.97km/L)</span></div>
+      <div class="calc-line"><span class="k">전국 평균가</span><span class="v">1,642원/L</span></div>
+      <div class="calc-formula">
+        왕복유류비 = 62.1km × 2 ÷ 11.97km/L × 1,642원 = <b>17,038원</b>
+      </div>
+    </div>
+    <div class="calc-block">
+      <h3>규정액</h3>
+      <div class="calc-line"><span class="k">일비</span><span class="v">25,000원</span></div>
+      <div class="calc-line"><span class="k">식비</span><span class="v">25,000원</span></div>
+      <div class="calc-formula">
+        방문일 소계 = 17,038 + 9,600 + 50,000 = <b>76,638원</b>
+      </div>
+    </div>
+  </div>
+  <div class="sheet-foot">
+    <button class="btn">유가 다시 조회</button>
+    <button class="btn primary">적용</button>
+  </div>
+</aside>
+
+<script>
+  document.querySelectorAll('[data-toggle]').forEach(head => {
+    head.addEventListener('click', () => {
+      const card = head.closest('.person-card')
+      const open = card.classList.toggle('open')
+      head.setAttribute('aria-expanded', open)
+    })
+  })
+  document.querySelectorAll('[data-open-sheet]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); document.body.classList.add('sheet-open') })
+  })
+  document.querySelectorAll('[data-close-sheet]').forEach(el => {
+    el.addEventListener('click', () => document.body.classList.remove('sheet-open'))
+  })
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') document.body.classList.remove('sheet-open') })
+</script>
