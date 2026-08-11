@@ -241,6 +241,15 @@ export async function createStaffCosts(formData: FormData) {
   }
   const receiptsFor = (rowId: string, subcategory: string) => receiptUrlsByRowSub[`receipt::${rowId}::${subcategory}`] ?? []
 
+  // 폼이 이미 저장된 첨부를 다시 올려보내는 목록 (kept::<rowId>::<subcategory>).
+  // 화면에서 ✕로 지운 URL은 여기 빠지므로, 신규 업로드분과 합쳐 최종 목록을 만든다.
+  const keptUrlsByRowSub: Record<string, string[]> = {}
+  for (const key of formData.keys()) {
+    if (!key.startsWith('kept::')) continue
+    keptUrlsByRowSub[key] = (formData.getAll(key) as string[]).filter(Boolean)
+  }
+  const keptFor = (rowId: string, subcategory: string) => keptUrlsByRowSub[`kept::${rowId}::${subcategory}`] ?? []
+
   const { data: siteParams } = await admin
     .from('site_parameters')
     .select('meal_allowance_daily_limit')
@@ -296,6 +305,8 @@ export async function createStaffCosts(formData: FormData) {
   const inserts: Record<string, unknown>[] = []
   const updates: { id: string; patch: Record<string, unknown> }[] = []
   const deleteIds = new Set<string>()
+  // 금액 0으로 남기는 행의 자식(건별 내역·교통비 산출)을 비울 대상
+  const clearChildIds = new Set<string>()
   const pendingChildren: PendingRow[] = []
 
   function reconcile(
@@ -307,8 +318,9 @@ export async function createStaffCosts(formData: FormData) {
   ) {
     const identity = row.userId || row.userName
     const existing = findExisting(identity, subcategory, row.periodStart)
+    // 화면에 남아있는 기존 첨부 + 이번에 올린 신규 첨부 (중복 URL 제거)
+    const finalReceipts = [...new Set([...keptFor(row.rowId, subcategory), ...receiptsFor(row.rowId, subcategory)])]
     if (amount > 0) {
-      const newReceipts = receiptsFor(row.rowId, subcategory)
       const common = {
         amount,
         amount_gross: opts.amountGross ?? null,
@@ -322,14 +334,25 @@ export async function createStaffCosts(formData: FormData) {
         expense_date: expenseDate,
       }
       if (existing) {
-        updates.push({ id: existing.id, patch: { ...common, receipt_urls: receiptsFor(row.rowId, subcategory).length ? newReceipts : existing.receipt_urls } })
+        updates.push({ id: existing.id, patch: { ...common, receipt_urls: finalReceipts } })
         if (opts.child) pendingChildren.push({ expenseId: existing.id, child: opts.child })
       } else {
-        inserts.push({ ...base, ...common, category, subcategory, target_user_id: row.userId || null, receipt_urls: newReceipts })
+        inserts.push({ ...base, ...common, category, subcategory, target_user_id: row.userId || null, receipt_urls: finalReceipts })
         if (opts.child) pendingChildren.push({ insertIndex: inserts.length - 1, child: opts.child })
       }
     } else if (existing) {
-      deleteIds.add(existing.id)
+      // 첨부만 먼저 올려둔 행(금액 0)은 지우지 않는다 — 지우면 업로드한 영수증이 함께 사라진다.
+      // 다만 금액이 0이면 사용금액·건별 내역·산출근거도 함께 비워야 한다
+      // (자가 출퇴근으로 바뀐 인원의 관리비 gross·내역이 남아 유령 금액으로 보이는 것을 막는다)
+      if (finalReceipts.length > 0) {
+        updates.push({
+          id: existing.id,
+          patch: { amount: 0, amount_gross: null, vat_mode: 'none', calc_detail: null, receipt_urls: finalReceipts },
+        })
+        clearChildIds.add(existing.id)
+      } else {
+        deleteIds.add(existing.id)
+      }
     }
   }
 
@@ -337,14 +360,22 @@ export async function createStaffCosts(formData: FormData) {
     // 식대: 근무일수 × 단가 (서버에서 재계산)
     reconcile(row, 'meal', 'site_residence', row.workDays > 0 ? row.workDays * mealLimit : 0, { workingDays: row.workDays || null })
 
+    // 자가 출퇴근자(출퇴근형)는 숙소비 대상이 아니다 — 클라이언트가 값을 보내도 0으로 확정한다
+    // (예본 「1-1 상주기술인 숙소비 사용내역」 비대상. 화면도 같은 규칙으로 칸을 잠근다)
+    const commuter = row.commuteMode === 'daily_commute'
+
     // 숙소임대비: 전세면 서버에서 환산 재계산
-    const lodgingAmount = row.lodgingCalcDetail?.contractType === 'jeonse'
-      ? convertJeonseToMonthly(row.lodgingCalcDetail.deposit ?? 0, row.lodgingCalcDetail.conversionRatePct ?? 0)
-      : row.lodgingRent
-    reconcile(row, 'lodging_rent', 'site_residence', lodgingAmount, { calcDetail: row.lodgingCalcDetail })
+    const lodgingAmount = commuter
+      ? 0
+      : row.lodgingCalcDetail?.contractType === 'jeonse'
+        ? convertJeonseToMonthly(row.lodgingCalcDetail.deposit ?? 0, row.lodgingCalcDetail.conversionRatePct ?? 0)
+        : row.lodgingRent
+    reconcile(row, 'lodging_rent', 'site_residence', lodgingAmount, {
+      calcDetail: commuter ? null : row.lodgingCalcDetail,
+    })
 
     // 관리비: 건별 내역 합계 → VAT제외 적용금액 (서버 재계산)
-    const maintItems = (row.maintenanceItems ?? []).filter((i) => i.amountGross > 0)
+    const maintItems = commuter ? [] : (row.maintenanceItems ?? []).filter((i) => i.amountGross > 0)
     const maint = calcItemized(maintItems.map((i) => ({ amountGross: i.amountGross })), 'exclude_10')
     reconcile(row, 'lodging_maintenance', 'site_residence', maint.appliedTotal, {
       amountGross: maint.grossTotal || null,
@@ -403,6 +434,12 @@ export async function createStaffCosts(formData: FormData) {
     for (const r of insertedRows ?? []) insertedIds.push(r.id)
   }
 
+  // 금액 0으로 남긴 행(첨부만 보존)의 자식 레코드 정리
+  for (const id of clearChildIds) {
+    await admin.from('expense_items').delete().eq('expense_id', id)
+    await admin.from('commute_calcs').delete().eq('expense_id', id)
+  }
+
   // 자식 테이블 동기화 (건별 내역 / 교통비 산출) — 부모 저장 후 replace 방식
   for (const pending of pendingChildren) {
     const expenseId = pending.expenseId ?? (pending.insertIndex !== undefined ? insertedIds[pending.insertIndex] : undefined)
@@ -457,6 +494,207 @@ export async function createStaffCosts(formData: FormData) {
   }
 
   return { success: true }
+}
+
+// ── 주재비 비목 단위 증분 저장 ──────────────────────────────────
+// 영수증을 한 묶음 올릴 때마다 저장해 나가는 흐름용. createStaffCosts와 같은 식별 키
+// (identity::subcategory::period_start)를 쓰므로 나중에 「임시저장」을 눌러도 같은 행을 가리킨다.
+
+export interface StaffCostItemTarget {
+  siteId: string
+  yearMonth: string
+  userId: string
+  userName: string
+  specialty: string | null
+  periodStart: string | null
+  periodEnd: string | null
+  subcategory: 'lodging_rent' | 'lodging_maintenance' | 'meal' | 'commute'
+  /** 거주 형태 — 'daily_commute'(자가 출퇴근)면 숙소비를 계상하지 않는다 */
+  commuteMode?: CommuteMode
+}
+
+// 대상 draft 행을 찾고, 없으면 만든다. 첨부만 먼저 올리는 경우가 있어 금액 0으로도 생성한다.
+async function findOrCreateStaffCostDraft(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  t: StaffCostItemTarget,
+): Promise<{ id: string; receiptUrls: string[] } | { error: string }> {
+  const identityColumn = t.userId ? 'target_user_id' : 'target_user_name'
+  const identityValue = t.userId || t.userName
+  const [yr, mo] = t.yearMonth.split('-').map(Number)
+
+  const { data: found, error: findError } = await admin
+    .from('expenses')
+    .select('id, receipt_urls, period_start')
+    .eq('site_id', t.siteId)
+    .eq('year', yr)
+    .eq('month', mo)
+    .eq('status', 'draft')
+    .eq('category', 'site_residence')
+    .eq('subcategory', t.subcategory)
+    .eq(identityColumn, identityValue)
+    .is('deleted_at', null)
+  if (findError) return { error: `조회 실패: ${findError.message}` }
+
+  // 기간까지 일치하는 행 우선, 없으면 기간 없이 저장된 구모델 행을 재사용
+  const exact = (found ?? []).find((r) => (r.period_start ?? '') === (t.periodStart ?? ''))
+  const hit = exact ?? (found ?? [])[0]
+  if (hit) return { id: hit.id, receiptUrls: hit.receipt_urls ?? [] }
+
+  const { data: created, error: insertError } = await admin
+    .from('expenses')
+    .insert({
+      site_id: t.siteId,
+      submitted_by: userId,
+      user_id: userId,
+      year: yr,
+      month: mo,
+      year_month: t.yearMonth,
+      status: 'draft',
+      category: 'site_residence',
+      subcategory: t.subcategory,
+      amount: 0,
+      is_over_limit: false,
+      over_limit_amount: 0,
+      expense_date: lastDayOfMonth(t.yearMonth),
+      headcount: 1,
+      target_user_id: t.userId || null,
+      target_user_name: t.userName,
+      specialty: t.specialty,
+      period_start: t.periodStart,
+      period_end: t.periodEnd,
+      receipt_urls: [],
+    })
+    .select('id, receipt_urls')
+    .single()
+  if (insertError) return { error: `저장 실패: ${insertError.message}` }
+  return { id: created.id, receiptUrls: created.receipt_urls ?? [] }
+}
+
+// (A) 첨부 즉시 업로드 — 금액은 건드리지 않는다. 반환한 URL로 화면이 링크를 그린다.
+export async function attachStaffCostReceipt(formData: FormData) {
+  const supabase = await createClient()
+  const admin = createAdminClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const target = JSON.parse(formData.get('target') as string) as StaffCostItemTarget
+  const files = (formData.getAll('files') as File[]).filter((f) => f.size > 0)
+  if (files.length === 0) return { error: '업로드할 파일이 없습니다.' }
+
+  const draft = await findOrCreateStaffCostDraft(admin, user.id, target)
+  if ('error' in draft) return draft
+
+  const added: string[] = []
+  for (const file of files) {
+    const ext = file.name.split('.').pop()
+    const path = `receipts/${user.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+    const { error: uploadError } = await supabase.storage
+      .from('receipts')
+      .upload(path, file, { contentType: file.type })
+    if (uploadError) return { error: `업로드 실패: ${uploadError.message}` }
+    added.push(supabase.storage.from('receipts').getPublicUrl(path).data.publicUrl)
+  }
+
+  const merged = [...new Set([...draft.receiptUrls, ...added])]
+  const { error } = await admin.from('expenses').update({ receipt_urls: merged }).eq('id', draft.id)
+  if (error) return { error: `저장 실패: ${error.message}` }
+  return { urls: merged, added }
+}
+
+// 첨부 개별 삭제 — 화면의 ✕ 즉시 반영
+export async function detachStaffCostReceipt(formData: FormData) {
+  const supabase = await createClient()
+  const admin = createAdminClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const target = JSON.parse(formData.get('target') as string) as StaffCostItemTarget
+  const url = formData.get('url') as string
+  const draft = await findOrCreateStaffCostDraft(admin, user.id, target)
+  if ('error' in draft) return draft
+
+  const merged = draft.receiptUrls.filter((u) => u !== url)
+  const { error } = await admin.from('expenses').update({ receipt_urls: merged }).eq('id', draft.id)
+  if (error) return { error: `삭제 실패: ${error.message}` }
+  return { urls: merged }
+}
+
+// (C) 비목 1건 저장 — 금액·건별 내역만 확정하고 첨부는 건드리지 않는다.
+export async function saveStaffCostItem(formData: FormData) {
+  const supabase = await createClient()
+  const admin = createAdminClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const target = JSON.parse(formData.get('target') as string) as StaffCostItemTarget
+
+  // 자가 출퇴근자는 숙소비 대상이 아니다 — 단건 저장 경로에서도 같은 규칙을 적용한다
+  if (target.commuteMode === 'daily_commute') {
+    return { error: '자가 출퇴근자는 숙소임대비·관리비를 계상하지 않습니다.' }
+  }
+
+  const draft = await findOrCreateStaffCostDraft(admin, user.id, target)
+  if ('error' in draft) return draft
+
+  // 클라이언트 값은 참고값 — 금액은 서버가 규칙대로 재계산해 확정한다
+  let amount = 0
+  let amountGross: number | null = null
+  let vatMode: 'none' | 'exclude_10' = 'none'
+  let calcDetail: object | null = null
+  let maintItems: StaffCostMaintItem[] = []
+
+  if (target.subcategory === 'lodging_rent') {
+    const detail = JSON.parse((formData.get('lodging_calc_detail') as string) || 'null') as LodgingCalcDetail | null
+    amount = detail?.contractType === 'jeonse'
+      ? convertJeonseToMonthly(detail.deposit ?? 0, detail.conversionRatePct ?? 0)
+      : Number(formData.get('amount') ?? 0)
+    calcDetail = detail
+  } else if (target.subcategory === 'lodging_maintenance') {
+    maintItems = (JSON.parse((formData.get('maint_items') as string) || '[]') as StaffCostMaintItem[])
+      .filter((i) => i.amountGross > 0)
+    const calc = calcItemized(maintItems.map((i) => ({ amountGross: i.amountGross })), 'exclude_10')
+    amount = calc.appliedTotal
+    amountGross = calc.grossTotal || null
+    vatMode = 'exclude_10'
+  } else {
+    return { error: '이 비목은 아직 단건 저장을 지원하지 않습니다.' }
+  }
+
+  const { error } = await admin
+    .from('expenses')
+    .update({
+      amount,
+      amount_gross: amountGross,
+      vat_mode: vatMode,
+      calc_detail: calcDetail,
+      target_user_name: target.userName,
+      specialty: target.specialty,
+      period_start: target.periodStart,
+      period_end: target.periodEnd,
+    })
+    .eq('id', draft.id)
+  if (error) return { error: `저장 실패: ${error.message}` }
+
+  if (target.subcategory === 'lodging_maintenance') {
+    await admin.from('expense_items').delete().eq('expense_id', draft.id)
+    if (maintItems.length > 0) {
+      const { error: itemError } = await admin.from('expense_items').insert(
+        maintItems.map((item, i) => ({
+          expense_id: draft.id,
+          item_date: item.date || lastDayOfMonth(target.yearMonth),
+          tag: item.tag,
+          description: item.tag === '가스' ? '가스비' : item.tag === '전기' ? '전기세' : '관리비',
+          amount_gross: item.amountGross,
+          amount_applied: item.amountGross, // VAT 제외는 합계 단위 적용 — 건별은 gross 유지
+          sort_order: i,
+        })),
+      )
+      if (itemError) return { error: `관리비 내역 저장 실패: ${itemError.message}` }
+    }
+  }
+
+  return { amount }
 }
 
 // ── 기술지원 기술인 출장비 (정산서 2-1) ──────────────────────────

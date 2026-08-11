@@ -3,8 +3,16 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
-import { upsertAttendance, addSiteStaffMember, deactivateSiteStaffMember, parseAttendanceSheet } from '@/actions/attendance'
-import { STAFF_TYPE_LABELS, SPECIALTIES, type StaffType } from '@/lib/constants'
+import { upsertAttendance, addSiteStaffMember, deactivateSiteStaffMember, updateSiteStaffResidence, parseAttendanceSheet } from '@/actions/attendance'
+import {
+  STAFF_TYPE_LABELS,
+  SPECIALTIES,
+  RESIDENCE_TYPES,
+  RESIDENCE_TYPE_LABELS,
+  RESIDENCE_TYPE_ICONS,
+  type StaffType,
+  type ResidenceType,
+} from '@/lib/constants'
 import type { AttendanceRecord, SiteStaffMember } from '@/types'
 
 interface Props {
@@ -25,6 +33,7 @@ type PersonRow = {
   name: string
   specialty: string | null
   memberId: string
+  residenceType: ResidenceType
 }
 
 // 출근부 구분 섹션 — 기성회차 단위. 출근부 1부를 첨부하고(자동 인식),
@@ -46,7 +55,18 @@ export function AttendanceSheetSection({
 
   const persons: PersonRow[] = members.map((m) => ({
     key: `m_${m.id}`, name: m.name, specialty: m.specialty, memberId: m.id,
+    residenceType: m.residence_type ?? RESIDENCE_TYPES.LODGING,
   }))
+
+  // 거주 형태(명부 기본값) 변경 — 주재비 화면의 숙소비 계상 여부가 여기서 갈린다
+  const [newResidence, setNewResidence] = useState<ResidenceType>(RESIDENCE_TYPES.LODGING)
+  function changeResidence(memberId: string, value: ResidenceType) {
+    startMemberTransition(async () => {
+      const res = await updateSiteStaffResidence(memberId, value)
+      if (res && 'error' in res) setError(res.error as string)
+      else router.refresh()
+    })
+  }
 
   const recordOf = (p: PersonRow, ym: string) =>
     records.find(
@@ -187,6 +207,7 @@ export function AttendanceSheetSection({
     fd.set('staff_type', staffType)
     fd.set('name', newName)
     fd.set('specialty', newSpecialty)
+    fd.set('residence_type', newResidence)
     startMemberTransition(async () => {
       const result = await addSiteStaffMember(fd)
       if (result && 'error' in result) {
@@ -194,6 +215,7 @@ export function AttendanceSheetSection({
       } else {
         setNewName('')
         setNewSpecialty('')
+        setNewResidence(RESIDENCE_TYPES.LODGING)
         router.refresh()
       }
     })
@@ -312,6 +334,26 @@ export function AttendanceSheetSection({
                   <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
                     {p.name}
                     {p.specialty && <span className="ml-1 text-xs text-gray-400">({p.specialty})</span>}
+                    {/* 거주 형태는 상주만 — 숙소비 계상 여부와 교통비 승수를 가른다 */}
+                    {!isSupport && (
+                      <select
+                        value={p.residenceType}
+                        onChange={(e) => changeResidence(p.memberId, e.target.value as ResidenceType)}
+                        disabled={isMemberPending}
+                        className={`ml-2 rounded-full border-0 px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-400 ${
+                          p.residenceType === 'commute'
+                            ? 'bg-sky-100 text-sky-700'
+                            : 'bg-purple-100 text-purple-700'
+                        }`}
+                        aria-label={`${p.name} 거주 형태`}
+                      >
+                        {Object.entries(RESIDENCE_TYPE_LABELS).map(([v, label]) => (
+                          <option key={v} value={v}>
+                            {RESIDENCE_TYPE_ICONS[v as ResidenceType]} {label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </td>
                   {isSupport ? (
                     <>
@@ -405,6 +447,20 @@ export function AttendanceSheetSection({
           <datalist id={specialtyListId}>
             {SPECIALTIES.map((s) => <option key={s} value={s} />)}
           </datalist>
+          {!isSupport && (
+            <select
+              value={newResidence}
+              onChange={(e) => setNewResidence(e.target.value as ResidenceType)}
+              className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+              aria-label="거주 형태"
+            >
+              {Object.entries(RESIDENCE_TYPE_LABELS).map(([v, label]) => (
+                <option key={v} value={v}>
+                  {RESIDENCE_TYPE_ICONS[v as ResidenceType]} {label}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             onClick={handleAddMember}

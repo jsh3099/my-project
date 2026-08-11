@@ -1,4 +1,4 @@
-import type { Role, StaffType, CommuteMode, VehicleFuelType } from '@/lib/constants'
+import type { Role, StaffType, CommuteMode, VehicleFuelType, ResidenceType } from '@/lib/constants'
 
 export type Profile = {
   id: string
@@ -76,6 +76,8 @@ export type SiteStaffMember = {
   name: string
   specialty: string | null
   staff_type: StaffType
+  /** 상주기술인 거주 형태 — lodging=숙소 사용, commute=자가 출퇴근(숙소비 없음) */
+  residence_type: ResidenceType
   is_active: boolean
   sort_order: number
   created_by: string | null

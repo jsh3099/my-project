@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import type { StaffType } from '@/lib/constants'
+import type { StaffType, ResidenceType } from '@/lib/constants'
 import { extractPdfLines, parseResidentDays, parseSupportVisits } from '@/lib/attendance/parseSheet'
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -262,12 +262,36 @@ export async function addSiteStaffMember(formData: FormData) {
   }
   if (!name) return { error: '성명을 입력하세요.' }
 
+  // 거주 형태 — 상주만 의미가 있다 (기술지원은 출장비로 정산)
+  const residenceRaw = formData.get('residence_type') as string | null
+  const residence_type: ResidenceType = residenceRaw === 'commute' ? 'commute' : 'lodging'
+
   const { error } = await supabase
     .from('site_staff_members')
-    .insert({ site_id, staff_type, name, specialty, created_by: user.id })
+    .insert({ site_id, staff_type, name, specialty, residence_type, created_by: user.id })
   if (error) return { error: '인원 추가에 실패했습니다: ' + error.message }
 
   revalidatePath('/attendance')
+  return { success: true }
+}
+
+// 명부 거주 형태 변경 — 주재비 폼의 회차별 실효값(commuteMode)과 달리 인원의 기본값을 바꾼다
+export async function updateSiteStaffResidence(memberId: string, residenceType: ResidenceType) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '인증이 필요합니다.' }
+  if (residenceType !== 'lodging' && residenceType !== 'commute') {
+    return { error: '거주 형태가 올바르지 않습니다.' }
+  }
+
+  const { error } = await supabase
+    .from('site_staff_members')
+    .update({ residence_type: residenceType })
+    .eq('id', memberId)
+  if (error) return { error: '거주 형태 변경에 실패했습니다: ' + error.message }
+
+  revalidatePath('/attendance')
+  revalidatePath('/expenses/staff-costs/resident')
   return { success: true }
 }
 

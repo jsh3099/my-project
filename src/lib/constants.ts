@@ -305,6 +305,39 @@ export const COMMUTE_MODE_LABELS: Record<CommuteMode, string> = {
   daily_commute: '출퇴근형 (근무일수)',
 }
 
+// ── 상주기술인 거주 형태 (명부 기본값) ─────────────────────────
+// 예본 「1-1 상주기술인 숙소비 사용내역」에 오르는 인원 = lodging.
+// commute(자가 출퇴근)는 숙소임대비·관리비를 계상하지 않고 교통비만 근무일수로 산출한다.
+export const RESIDENCE_TYPES = {
+  LODGING: 'lodging',
+  COMMUTE: 'commute',
+} as const
+
+export type ResidenceType = (typeof RESIDENCE_TYPES)[keyof typeof RESIDENCE_TYPES]
+
+export const RESIDENCE_TYPE_LABELS: Record<ResidenceType, string> = {
+  lodging: '숙소 사용',
+  commute: '자가 출퇴근',
+}
+
+export const RESIDENCE_TYPE_ICONS: Record<ResidenceType, string> = {
+  lodging: '🏠',
+  commute: '🚗',
+}
+
+// 표 안 좁은 칸용 짧은 라벨
+export const RESIDENCE_TYPE_SHORT: Record<ResidenceType, string> = {
+  lodging: '숙소',
+  commute: '출퇴근',
+}
+
+// 거주 형태 ↔ 교통비 유형은 1:1로 대응한다 (숙소 사용=주말 귀가, 자가 출퇴근=매일 왕복)
+export const residenceToCommuteMode = (r: ResidenceType): CommuteMode =>
+  r === 'commute' ? 'daily_commute' : 'lodging_return'
+
+export const commuteModeToResidence = (m: CommuteMode): ResidenceType =>
+  m === 'daily_commute' ? 'commute' : 'lodging'
+
 export const SITE_STATUS = {
   ACTIVE: 'active',
   COMPLETED: 'completed',

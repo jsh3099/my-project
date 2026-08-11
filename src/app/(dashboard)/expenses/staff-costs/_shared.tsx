@@ -1,11 +1,11 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { StaffCostForm } from '@/components/expenses/StaffCostForm'
+import { StaffCostForm, type StaffCostDraftItem } from '@/components/expenses/StaffCostForm'
 import { SupportTripForm } from '@/components/expenses/SupportTripForm'
-import type { StaffType } from '@/lib/constants'
+import type { StaffType, CommuteMode, VehicleFuelType } from '@/lib/constants'
 import { STAFF_TYPE_LABELS } from '@/lib/constants'
-import type { Site, Profile, AttendanceRecord, SiteStaffMember, SettlementRound } from '@/types'
+import type { Site, Profile, AttendanceRecord, SiteStaffMember, SettlementRound, LodgingCalcDetail } from '@/types'
 
 function currentYearMonth() {
   const d = new Date()
@@ -126,6 +126,65 @@ export async function StaffCostsPageContent({
   }
   const members = (membersData ?? []) as SiteStaffMember[]
 
+  // 이미 저장한 draft 주재비 — 영수증을 올릴 때마다 저장해 나가는 흐름이라
+  // 재진입 시 금액·건별 내역·첨부가 폼에 그대로 복원되어야 한다.
+  // (복원하지 않으면 빈 폼으로 「임시저장」했을 때 기존 draft가 지워진다)
+  const { data: draftData } = await admin
+    .from('expenses')
+    .select('subcategory, target_user_id, target_user_name, amount, period_start, period_end, receipt_urls, calc_detail, expense_items(item_date, tag, amount_gross, sort_order), commute_calcs(mode, home_address, distance_oneway_km, fuel_type, fuel_efficiency, fuel_price, fuel_price_date, toll_roundtrip, multiplier)')
+    .eq('site_id', siteId)
+    .eq('year', parseInt(year, 10))
+    .eq('month', month)
+    .eq('status', 'draft')
+    .eq('category', 'site_residence')
+    .not('target_user_name', 'is', null)
+    .is('deleted_at', null)
+
+  type DraftRaw = {
+    subcategory: string
+    target_user_id: string | null
+    target_user_name: string
+    amount: number
+    period_start: string | null
+    period_end: string | null
+    receipt_urls: string[] | null
+    calc_detail: LodgingCalcDetail | null
+    expense_items: { item_date: string; tag: string | null; amount_gross: number; sort_order: number }[] | null
+    commute_calcs: {
+      mode: CommuteMode; home_address: string | null; distance_oneway_km: number
+      fuel_type: VehicleFuelType; fuel_efficiency: number; fuel_price: number
+      fuel_price_date: string | null; toll_roundtrip: number; multiplier: number
+    }[] | null
+  }
+  const existingDrafts: StaffCostDraftItem[] = ((draftData ?? []) as unknown as DraftRaw[]).map((d) => {
+    const commute = d.commute_calcs?.[0] ?? null
+    return {
+      identity: d.target_user_name,
+      subcategory: d.subcategory,
+      amount: d.amount,
+      periodStart: d.period_start,
+      periodEnd: d.period_end,
+      receiptUrls: d.receipt_urls ?? [],
+      calcDetail: d.calc_detail,
+      maintItems: [...(d.expense_items ?? [])]
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map((i) => ({ date: i.item_date, tag: i.tag ?? '전기', amountGross: i.amount_gross })),
+      commute: commute
+        ? {
+            mode: commute.mode,
+            homeAddress: commute.home_address,
+            distanceOnewayKm: commute.distance_oneway_km,
+            fuelType: commute.fuel_type,
+            fuelEfficiency: commute.fuel_efficiency,
+            fuelPrice: commute.fuel_price,
+            fuelPriceDate: commute.fuel_price_date,
+            tollRoundtrip: commute.toll_roundtrip,
+            multiplier: commute.multiplier,
+          }
+        : null,
+    }
+  })
+
   // 자차 산출 기본값(자택주소·유종)용 본인 프로필
   const { data: meData } = await admin.from('profiles').select('*').eq('id', user.id).maybeSingle()
   const me = (meData as Profile) ?? null
@@ -191,6 +250,7 @@ export async function StaffCostsPageContent({
           yearMonth={yearMonth}
           members={members}
           attendance={attendance}
+          existingDrafts={existingDrafts}
           defaultPeriodStart={openRound?.period_start}
           defaultPeriodEnd={openRound?.period_end}
           mealDailyLimit={siteParams?.meal_allowance_daily_limit ?? 25000}
