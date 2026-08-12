@@ -12,6 +12,8 @@ interface Props {
   siteId: string
   yearMonth: string
   hasDraft: boolean
+  /** 진행 중 기성회차 — 제출은 회차 기성기간 전체 단위 (없으면 월 단위 폴백) */
+  round?: { label: string; draftCount: number; draftAmount: number } | null
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -32,7 +34,7 @@ function getSubLabel(category: string, subcategory: string) {
   return subs.find((s) => s.value === subcategory)?.label ?? subcategory
 }
 
-export function ExpenseList({ expenses, siteId, yearMonth, hasDraft }: Props) {
+export function ExpenseList({ expenses, siteId, yearMonth, hasDraft, round = null }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -56,13 +58,9 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft }: Props) {
     })
   }
 
-  if (expenses.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-gray-300 py-16 text-center">
-        <p className="text-gray-400">이 달에 입력된 비용이 없습니다.</p>
-      </div>
-    )
-  }
+  // 제출은 회차 단위 — 조회 중인 달에 draft가 없어도 회차의 다른 달에 남아있으면 배너를 보인다
+  const submittable = round ? round.draftCount > 0 : hasDraft
+  const submitScopeLabel = round ? `${round.label} 기성기간 전체` : `${yearMonth.replace('-', '년 ')}월`
 
   return (
     <div className="space-y-4">
@@ -72,14 +70,18 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft }: Props) {
         </div>
       )}
 
-      {/* 본사 제출 버튼 */}
-      {hasDraft && (
+      {/* 본사 제출 버튼 — 기성(정산)이 회차 단위이므로 회차 기간의 작성중 항목을 한 번에 제출한다 */}
+      {submittable && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
           {!submitConfirm ? (
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-blue-800">본사 제출 준비 완료</p>
-                <p className="text-xs text-blue-600">작성중인 항목을 본사에 제출합니다.</p>
+                <p className="text-xs text-blue-600">
+                  {round
+                    ? <>{round.label} 작성중 <b>{round.draftCount}건 · {round.draftAmount.toLocaleString()}원</b>을 본사에 제출합니다. (조회 월과 무관하게 회차 전체)</>
+                    : '작성중인 항목을 본사에 제출합니다.'}
+                </p>
               </div>
               <button
                 onClick={() => setSubmitConfirm(true)}
@@ -92,7 +94,7 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft }: Props) {
           ) : (
             <div className="space-y-3">
               <p className="text-sm font-semibold text-blue-800">
-                {yearMonth.replace('-', '년 ')}월 비용 내역을 본사에 제출하시겠습니까?
+                {submitScopeLabel}의 비용 내역{round ? ` ${round.draftCount}건 (${round.draftAmount.toLocaleString()}원)` : ''}을 본사에 제출하시겠습니까?
               </p>
               <p className="text-xs text-blue-600">제출 후에는 수정이 불가합니다.</p>
               <div className="flex gap-2">
@@ -111,7 +113,14 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft }: Props) {
         </div>
       )}
 
+      {expenses.length === 0 && (
+        <div className="rounded-xl border border-dashed border-gray-300 py-16 text-center">
+          <p className="text-gray-400">이 달에 입력된 비용이 없습니다.{round && round.draftCount > 0 ? ' (회차의 다른 달에 작성중 항목이 있습니다 — 월 필터를 바꿔 확인하세요)' : ''}</p>
+        </div>
+      )}
+
       {/* 목록 */}
+      {expenses.length > 0 && (
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
         <div className="divide-y divide-gray-100">
           {expenses.map((expense) => (
@@ -206,6 +215,7 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft }: Props) {
           ))}
         </div>
       </div>
+      )}
     </div>
   )
 }

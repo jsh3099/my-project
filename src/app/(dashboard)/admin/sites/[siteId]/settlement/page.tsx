@@ -74,6 +74,24 @@ export default async function SettlementRoundsPage({ params }: Props) {
     }
   }
 
+  // 확정 안전망 — 회차 기간 내 미제출 임시저장(draft)은 확정에 편입되지 않아 그대로 삭감이 된다.
+  // 확정 직전에 본사가 인지하도록 건수·금액을 집계해 경고한다.
+  let unsubmittedCount = 0
+  let unsubmittedAmount = 0
+  if (openRound) {
+    const { data: draftRows } = await supabase
+      .from('expenses')
+      .select('amount, over_limit_amount')
+      .eq('site_id', siteId)
+      .eq('status', 'draft')
+      .is('settlement_round_id', null)
+      .is('deleted_at', null)
+      .gte('expense_date', openRound.period_start)
+      .lte('expense_date', addDaysISO(openRound.period_end, 31)) // 월말 저장 관행 대비 여유
+    unsubmittedCount = (draftRows ?? []).length
+    unsubmittedAmount = (draftRows ?? []).reduce((s, e) => s + (e.amount - (e.over_limit_amount ?? 0)), 0)
+  }
+
   // 진행 중인 회차의 잠정 사용액 미리보기 (제출됨 + 아직 어느 회차에도 속하지 않은 건)
   let previewTree: ReturnType<typeof buildCategorySummaryTree> = []
   let usedByCategory = new Map<string, number>()
@@ -329,7 +347,13 @@ export default async function SettlementRoundsPage({ params }: Props) {
             </div>
           )}
 
-          <ConfirmRoundButton siteId={siteId} roundId={openRound.id} roundNo={openRound.round_no} />
+          <ConfirmRoundButton
+            siteId={siteId}
+            roundId={openRound.id}
+            roundNo={openRound.round_no}
+            unsubmittedCount={unsubmittedCount}
+            unsubmittedAmount={unsubmittedAmount}
+          />
         </div>
       )}
 

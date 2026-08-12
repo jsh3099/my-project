@@ -869,20 +869,49 @@ export async function createSupportTrips(formData: FormData) {
   return { success: true }
 }
 
+// 회차 기성기간에 걸치는 연월 목록 (최대 24개월 안전 상한)
+function monthsBetween(periodStart: string, periodEnd: string): string[] {
+  const months: string[] = []
+  const [sy, sm] = periodStart.slice(0, 7).split('-').map(Number)
+  const [ey, em] = periodEnd.slice(0, 7).split('-').map(Number)
+  let y = sy
+  let m = sm
+  while ((y < ey || (y === ey && m <= em)) && months.length < 24) {
+    months.push(`${y}-${String(m).padStart(2, '0')}`)
+    m += 1
+    if (m > 12) { m = 1; y += 1 }
+  }
+  return months
+}
+
+// 본사 제출 — 기성(정산서 제출)이 회차 단위이므로, 진행 중 회차가 있으면
+// 회차 기성기간 전체의 draft를 한 번에 제출한다. 월 단위로 제출하면 다른 달의
+// draft가 남아 회차 확정(submitted·approved만 편입)에서 조용히 누락된다.
+// 진행 중 회차가 없으면 종전대로 해당 월만 제출한다.
 export async function submitExpenses(siteId: string, yearMonth: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: '로그인이 필요합니다.' }
 
-  const { error } = await supabase
+  const { data: openRound } = await supabase
+    .from('settlement_rounds')
+    .select('period_start, period_end')
+    .eq('site_id', siteId)
+    .eq('status', 'open')
+    .maybeSingle()
+
+  let query = supabase
     .from('expenses')
     .update({ status: 'submitted' })
     .eq('site_id', siteId)
     .eq('user_id', user.id)
-    .eq('year_month', yearMonth)
     .eq('status', 'draft')
     .is('deleted_at', null)
+  query = openRound
+    ? query.in('year_month', monthsBetween(openRound.period_start, openRound.period_end))
+    : query.eq('year_month', yearMonth)
 
+  const { error } = await query
   if (error) return { error: error.message }
   return { success: true }
 }

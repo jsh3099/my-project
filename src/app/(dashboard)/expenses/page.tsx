@@ -4,11 +4,28 @@ import Link from 'next/link'
 import { PlusCircle } from 'lucide-react'
 import { ExpenseList } from '@/components/expenses/ExpenseList'
 import { SiteSelect, MonthSelect } from '@/components/expenses/ExpenseFilters'
-import type { Expense, Site } from '@/types'
+import type { Expense, SettlementRound, Site } from '@/types'
 
 function currentYearMonth() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+const pad = (n: number) => String(n).padStart(2, '0')
+
+// 회차 기성기간에 걸치는 연월 목록 (최대 24개월 안전 상한)
+function monthsOfRound(round: SettlementRound): string[] {
+  const months: string[] = []
+  const [sy, sm] = round.period_start.slice(0, 7).split('-').map(Number)
+  const [ey, em] = round.period_end.slice(0, 7).split('-').map(Number)
+  let y = sy
+  let m = sm
+  while ((y < ey || (y === ey && m <= em)) && months.length < 24) {
+    months.push(`${y}-${pad(m)}`)
+    m += 1
+    if (m > 12) { m = 1; y += 1 }
+  }
+  return months
 }
 
 export default async function ExpensesPage({
@@ -33,16 +50,44 @@ export default async function ExpensesPage({
   const selectedSiteId = params.site ?? sites[0]?.id ?? ''
 
   let expenses: Expense[] = []
+  // 제출은 회차 단위 — 진행 중 회차의 작성중 항목 현황(조회 월과 무관)을 함께 집계한다
+  let round: { label: string; draftCount: number; draftAmount: number } | null = null
   if (selectedSiteId) {
-    const { data } = await supabase
-      .from('expenses')
-      .select('*')
-      .eq('site_id', selectedSiteId)
-      .eq('user_id', user.id)
-      .eq('year_month', ym)
-      .is('deleted_at', null)
-      .order('expense_date', { ascending: false })
+    const [{ data }, { data: openRoundData }] = await Promise.all([
+      supabase
+        .from('expenses')
+        .select('*')
+        .eq('site_id', selectedSiteId)
+        .eq('user_id', user.id)
+        .eq('year_month', ym)
+        .is('deleted_at', null)
+        .order('expense_date', { ascending: false }),
+      supabase
+        .from('settlement_rounds')
+        .select('*')
+        .eq('site_id', selectedSiteId)
+        .eq('status', 'open')
+        .maybeSingle(),
+    ])
     expenses = (data ?? []) as Expense[]
+
+    const openRound = (openRoundData ?? null) as SettlementRound | null
+    if (openRound) {
+      const { data: draftRows } = await supabase
+        .from('expenses')
+        .select('amount, over_limit_amount')
+        .eq('site_id', selectedSiteId)
+        .eq('user_id', user.id)
+        .eq('status', 'draft')
+        .is('deleted_at', null)
+        .in('year_month', monthsOfRound(openRound))
+      const drafts = draftRows ?? []
+      round = {
+        label: `${openRound.round_no}회차 (${openRound.period_start} ~ ${openRound.period_end})`,
+        draftCount: drafts.length,
+        draftAmount: drafts.reduce((s, e) => s + (e.amount - (e.over_limit_amount ?? 0)), 0),
+      }
+    }
   }
 
   const totalAmount = expenses.reduce((s, e) => s + e.amount, 0)
@@ -109,6 +154,7 @@ export default async function ExpensesPage({
         siteId={selectedSiteId}
         yearMonth={ym}
         hasDraft={hasDraft}
+        round={round}
       />
     </div>
   )

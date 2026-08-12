@@ -54,6 +54,9 @@ export function AttendanceSheetSection({
   const [success, setSuccess] = useState(false)
   // 기존 첨부 중 유지할 것 (X 클릭 시 제외 → 저장 시 삭제 처리)
   const [keptUrls, setKeptUrls] = useState<string[]>(sheetFileUrls)
+  // 저장 후 router.refresh()로 서버 첨부 목록이 갱신되면 화면도 따라간다
+  // (새로 업로드된 파일이 기존 첨부 칩으로 나타난다)
+  useEffect(() => { setKeptUrls(sheetFileUrls) }, [sheetFileUrls])
   // 새로 선택한 파일 이름 (input.files에 담겨 있다가 저장 시 업로드)
   const [pickedNames, setPickedNames] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -230,6 +233,10 @@ export function AttendanceSheetSection({
           p.key,
           (isSupport ? (visitDates[p.key] ?? []).length > 0 : (parseInt(workDays[p.key] ?? '0', 10) || 0) > 0) ? 'saved' : 'empty',
         ])))
+        // 선택 파일은 업로드 완료 — 입력란을 비워 연속 저장 시 같은 파일이 중복 업로드되지 않게 한다
+        if (fileInputRef.current) fileInputRef.current.value = ''
+        setPickedNames([])
+        router.refresh() // 서버 첨부 목록(kept 칩) 갱신
       }
     })
   }
