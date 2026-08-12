@@ -1,25 +1,36 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import fs from 'fs'
 import path from 'path'
-import { extractPdfLines, parseResidentDays } from '../parseSheet'
+import { extractPdfLines, parseResidentDays, parseSupportVisits } from '../parseSheet'
 
-// 사용자 배포용 테스트 출근부(바탕화면 테스트증빙_5회차 폴더)가 파서와 계속 맞는지 확인한다.
-// 명부 이름을 바꾸면(정상운 → 성혁기) 이 파일도 함께 다시 만들어야 한다.
-const SHEET = 'C:/Users/user/Desktop/테스트증빙_5회차/1.테스트_출근부_상주_2026-04~08.pdf'
-const NAMES = ['강희철', '성혁기']
+// 테스터에게 배포하는 실제 출근부 묶음이 파서와 계속 맞는지 지킨다.
+// (파서 자체 검증은 커밋된 픽스처를 쓰는 parseSheet.test.ts가 담당 — 목적이 다르다)
+//
+// 경로는 `scripts/gen-test-evidence.ts`의 기본 출력 위치다. 다른 곳에 만들었으면
+// TEST_EVIDENCE_DIR 로 알려준다. 생성기를 돌리지 않은 PC에서는 skip된다.
+// 명부·일수 사양은 생성기와 한 쌍이므로, 한쪽만 바뀌면 여기서 잡힌다.
+const EVIDENCE_DIR =
+  process.env.TEST_EVIDENCE_DIR ??
+  path.join(process.env.USERPROFILE ?? '', 'Desktop', '테스트증빙_5회차')
+const SHEET_DIR = path.join(EVIDENCE_DIR, '1.출근부')
+const RESIDENT = path.join(SHEET_DIR, '테스트_출근부_상주_2026-04~08.pdf')
+const SUPPORT = path.join(SHEET_DIR, '테스트_출근부_기술지원_2026-04~08.pdf')
 
-describe.skipIf(!fs.existsSync(SHEET))('배포용 테스트 출근부 (상주 2026-04~08)', () => {
+const RESIDENT_NAMES = ['강희철', '성혁기']
+const SUPPORT_NAMES = ['류익선', '김태식']
+const EXPECTED_DAYS: Record<number, number> = { 4: 22, 5: 19, 6: 22, 7: 23, 8: 20 }
+
+describe.skipIf(!fs.existsSync(RESIDENT))('배포용 출근부 — 상주 (2026-04~08)', () => {
   let lines: string[]
 
   beforeAll(async () => {
-    lines = await extractPdfLines(new Uint8Array(fs.readFileSync(path.normalize(SHEET))))
+    lines = await extractPdfLines(new Uint8Array(fs.readFileSync(RESIDENT)))
   })
 
   it('월별 출근일수를 인원별로 인식한다 (합계 106일)', () => {
-    const expected: Record<number, number> = { 4: 22, 5: 19, 6: 22, 7: 23, 8: 20 }
     let total = 0
-    for (const [month, days] of Object.entries(expected)) {
-      const result = parseResidentDays(lines, NAMES, 2026, Number(month))
+    for (const [month, days] of Object.entries(EXPECTED_DAYS)) {
+      const result = parseResidentDays(lines, RESIDENT_NAMES, 2026, Number(month))
       expect(result, `2026-${month}월`).toEqual({ 강희철: days, 성혁기: days })
       total += days
     }
@@ -28,7 +39,39 @@ describe.skipIf(!fs.existsSync(SHEET))('배포용 테스트 출근부 (상주 20
 
   // 총괄표 헤더에 두 이름이 모두 있으므로, 명부 순서가 달라도 열 순서를 헤더에서 잡아낸다
   it('명부 순서가 표와 달라도 열을 이름으로 맞춘다', () => {
-    const result = parseResidentDays(lines, ['성혁기', '강희철'], 2026, 7)
-    expect(result).toEqual({ 강희철: 23, 성혁기: 23 })
+    expect(parseResidentDays(lines, ['성혁기', '강희철'], 2026, 7)).toEqual({ 강희철: 23, 성혁기: 23 })
+  })
+})
+
+describe.skipIf(!fs.existsSync(SUPPORT))('배포용 출근부 — 기술지원 (2026-04~08)', () => {
+  let lines: string[]
+
+  beforeAll(async () => {
+    lines = await extractPdfLines(new Uint8Array(fs.readFileSync(SUPPORT)))
+  })
+
+  // 방문일은 류익선=2·4번째 화요일 / 김태식=2·4번째 목요일 (전 회차 인당 10일)
+  it('방문일자를 인원별·월별로 인식한다', () => {
+    expect(parseSupportVisits(lines, SUPPORT_NAMES, 2026, 4)).toEqual({
+      류익선: ['2026-04-14', '2026-04-28'],
+      김태식: ['2026-04-09', '2026-04-23'],
+    })
+    expect(parseSupportVisits(lines, SUPPORT_NAMES, 2026, 8)).toEqual({
+      류익선: ['2026-08-11', '2026-08-25'],
+      김태식: ['2026-08-13', '2026-08-27'],
+    })
+  })
+
+  it('인당 방문 10일 — 회차 전체 20회', () => {
+    const total = Object.keys(EXPECTED_DAYS).reduce((sum, month) => {
+      const r = parseSupportVisits(lines, SUPPORT_NAMES, 2026, Number(month))
+      return sum + (r.류익선?.length ?? 0) + (r.김태식?.length ?? 0)
+    }, 0)
+    expect(total).toBe(20)
+  })
+
+  // 문서 상단 "대상 기간 2026-04-01 ~ …" 줄을 방문일로 잡으면 출장 횟수가 부풀려진다
+  it('대상 기간 줄을 방문일로 오인하지 않는다', () => {
+    expect(parseSupportVisits(lines, SUPPORT_NAMES, 2026, 3)).toEqual({})
   })
 })
