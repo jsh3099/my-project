@@ -134,7 +134,7 @@ type Row = {
   conversionRate: string
   // 관리비: 건별 내역 (입금일자·전기/가스·금액) — 합계에서 VAT 제외한 적용금액만 인정
   maintItems: MaintItem[]
-  // 교통비: 1회 왕복비 × (숙박형: 월횟수 / 출퇴근형: 근무일수)
+  // 교통비: 1회 왕복비 × (숙박형: 주말 왕복 횟수 / 출퇴근형: 근무일수)
   commuteMode: CommuteMode
   commuteRoundtrip: string
   commuteTrips: string
@@ -453,6 +453,27 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
     residenceType: m.residence_type ?? RESIDENCE_TYPES.LODGING,
   }))
 
+  // 명부 자택주소 — 출근부 화면에서 거주지 증빙으로 채운 값이 자차 산출 출발지로 자동 매핑된다
+  const memberHomeAddress: Record<string, string | undefined> = Object.fromEntries(
+    members.map((m) => [`m_${m.id}`, m.home_address ?? undefined]),
+  )
+
+  // 기성기간 개월수 — 첨부 한도·주말 왕복 기본 횟수의 기준
+  const periodMonths =
+    defaultPeriodStart && defaultPeriodEnd
+      ? Math.max(
+          1,
+          (parseInt(defaultPeriodEnd.slice(0, 4), 10) * 12 + parseInt(defaultPeriodEnd.slice(5, 7), 10)) -
+            (parseInt(defaultPeriodStart.slice(0, 4), 10) * 12 + parseInt(defaultPeriodStart.slice(5, 7), 10)) +
+            1,
+        )
+      : 1
+  // 숙박형 주말 왕복은 기성기간 전체 횟수로 입력한다 (월 4회 원칙 × 개월수).
+  // 회차가 5개월이면 20회 — 월 단위로 받으면 회차 전체 금액이 개월수만큼 모자란다.
+  const roundTripsDefault = commuteTripsDefault * periodMonths
+  // 상한은 기성기간에 비례해 열어둔다 (주 1회+여유 = 월 8회분)
+  const maxRoundTrips = Math.max(10, periodMonths * 8)
+
   // 저장된 draft를 이름 기준으로 묶어둔다 (명부 인원은 계정이 없어 이름이 식별자)
   const draftsByName = new Map<string, Map<string, StaffCostDraftItem>>()
   for (const d of existingDrafts) {
@@ -506,7 +527,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
         p.defaultSpecialty && (SPECIALTIES as readonly string[]).includes(p.defaultSpecialty)
           ? p.defaultSpecialty
           : SPECIALTIES[i % SPECIALTIES.length],
-        commuteTripsDefault,
+        roundTripsDefault,
         defaultPeriodStart,
         defaultPeriodEnd,
         p.residenceType,
@@ -541,15 +562,6 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
   }
 
   // 인원당 첨부 한도 — 기성기간 개월수에 비례 (개월수 × 4 + 여유, 최소 30)
-  const periodMonths =
-    defaultPeriodStart && defaultPeriodEnd
-      ? Math.max(
-          1,
-          (parseInt(defaultPeriodEnd.slice(0, 4), 10) * 12 + parseInt(defaultPeriodEnd.slice(5, 7), 10)) -
-            (parseInt(defaultPeriodStart.slice(0, 4), 10) * 12 + parseInt(defaultPeriodStart.slice(5, 7), 10)) +
-            1,
-        )
-      : 1
   const maxFiles = Math.max(30, periodMonths * 4 + 10)
   // 상세 패널(영수증/관리비 내역/숙소 계약/자차 산출)은 우측 시트 하나로 연다 —
   // 표 안에 끼워넣던 이전 구조의 잘림 문제를 구조적으로 없앤다
@@ -561,6 +573,14 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [sheet])
+
+  // 산출값 적용 안내 — 시트가 닫힌 뒤 어느 카드에 무엇이 반영됐는지 알려준다 (몇 초 후 사라짐)
+  const [applyNotice, setApplyNotice] = useState<{ id: string; text: string } | null>(null)
+  useEffect(() => {
+    if (!applyNotice) return
+    const t = setTimeout(() => setApplyNotice(null), 6000)
+    return () => clearTimeout(t)
+  }, [applyNotice])
 
   // 카드 접기 상태 (기본 펼침 — 인원이 많으면 접어서 훑는다)
   const [collapsedCards, setCollapsedCards] = useState<Set<string>>(new Set())
@@ -768,7 +788,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
 
   function addRow() {
     const id = `extra_${++extraIdSeq}`
-    setExtraRows((p) => [...p, { id, name: '', ...makeDefaultRow(yearMonth, '건축', commuteTripsDefault, defaultPeriodStart, defaultPeriodEnd) }])
+    setExtraRows((p) => [...p, { id, name: '', ...makeDefaultRow(yearMonth, '건축', roundTripsDefault, defaultPeriodStart, defaultPeriodEnd) }])
   }
 
   function removeRow(id: string) {
@@ -951,6 +971,15 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
           </div>
         </div>
 
+        {/* 산출값 적용 안내 — 시트를 닫고 돌아왔을 때 무엇이 반영됐는지 보인다 */}
+        {applyNotice?.id === id && (
+          <div className="flex items-center gap-2 border-t border-green-100 bg-green-50 px-4 py-2 text-xs font-semibold text-green-700">
+            <span>✓ {applyNotice.text}</span>
+            <button type="button" onClick={() => setApplyNotice(null)} aria-label="안내 닫기"
+              className="ml-auto text-green-400 hover:text-green-700">✕</button>
+          </div>
+        )}
+
         {!collapsed && (
           <>
             {/* 근무기간 · 근무일수 */}
@@ -1026,7 +1055,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
 
               <div className="flex min-h-[108px] flex-col gap-1.5 bg-white p-3.5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-gray-500">{commuter ? '출퇴근 교통비' : '귀가 교통비'}</span>
+                  <span className="text-xs font-semibold text-gray-500">{commuter ? '출퇴근 교통비' : '주말 교통비'}</span>
                   {applyCommuteRegulation && statusChip(itemStatus(id, 'commute', d.commuteTotal))}
                 </div>
                 {!applyCommuteRegulation ? (
@@ -1041,14 +1070,21 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                       ×
                       {r.commuteMode === 'lodging_return' ? (
                         <>
-                          <input type="number" min={0} max={10} value={r.commuteTrips} onChange={(e) => patch({ commuteTrips: e.target.value })}
-                            className="w-11 rounded border border-gray-300 px-1 py-1 text-center text-xs focus:border-blue-500 focus:outline-none" />
-                          회 (월 귀가)
+                          <input type="number" min={0} max={maxRoundTrips} value={r.commuteTrips}
+                            onChange={(e) => patch({ commuteTrips: e.target.value })}
+                            title={`기성기간 전체 주말 왕복 횟수 — 기본 월 ${commuteTripsDefault}회 × ${periodMonths}개월 = ${roundTripsDefault}회 (최대 ${maxRoundTrips}회)`}
+                            className="w-14 rounded border border-gray-300 px-1 py-1 text-center text-xs focus:border-blue-500 focus:outline-none" />
+                          회 (주말 왕복)
                         </>
                       ) : (
                         <span>{d.wd}일 (근무일수)</span>
                       )}
                     </div>
+                    {r.commuteMode === 'lodging_return' && (
+                      <p className="text-[10.5px] text-gray-400">
+                        기성기간 전체 기준 — 월 {commuteTripsDefault}회 × {periodMonths}개월 = {roundTripsDefault}회
+                      </p>
+                    )}
                     <button type="button" onClick={() => setSheet({ id, isExtra, panel: 'commute' })}
                       className="mt-auto text-left text-xs font-semibold text-green-700 hover:underline">
                       🚗 자차 왕복비 산출
@@ -1209,7 +1245,12 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                   siteId={siteId}
                   siteAddress={siteAddress ?? ''}
                   isOwnRow={sheet.id === myUserId}
-                  defaultHomeAddress={sheet.id === myUserId ? myHomeAddress : undefined}
+                  // 자택주소 우선순위: 이미 산출한 값 → 명부(거주지 증빙에서 인식) → 본인 프로필
+                  defaultHomeAddress={
+                    sheetRow.commuteCalc?.homeAddress
+                    || memberHomeAddress[sheet.id]
+                    || (sheet.id === myUserId ? myHomeAddress : undefined)
+                  }
                   defaultFuelType={sheet.id === myUserId ? myFuelType : undefined}
                   periodStart={sheetRow.periodStart}
                   periodEnd={sheetRow.periodEnd}
@@ -1225,6 +1266,13 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                         fuelPriceDate: params.fuelPriceDate,
                         tollRoundtrip: params.tollRoundtrip,
                       },
+                    })
+                    // 적용 즉시 시트를 닫고 카드로 돌아간다 — 반영된 금액을 그 자리에서 확인하도록
+                    // (시트가 카드를 가려, 열린 채로 두면 적용됐는지 알 수 없다)
+                    setSheet(null)
+                    setApplyNotice({
+                      id: sheet.id,
+                      text: `${sheetName} 1회 왕복비 ${params.costPerTrip.toLocaleString('ko-KR')}원 적용 — 아래 교통비 금액을 확인하고 저장하세요.`,
                     })
                   }}
                 />

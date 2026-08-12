@@ -175,22 +175,36 @@ export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAdd
           />
         </div>
         <div>
-          <label className="mb-0.5 block text-xs text-gray-500">현장주소</label>
-          <div className="flex gap-1">
-            <input
-              type="text" value={siteAddr} onChange={(e) => setSiteAddr(e.target.value)}
-              placeholder="예: 충북 청주시 상당구 ○○로 123"
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
-            />
-            {siteAddr.trim() && siteAddr !== siteAddress && (
-              <button type="button" onClick={handleSaveSiteAddress} disabled={isPending}
-                title="현장주소로 저장 — 다음부터 모든 인원에게 자동 입력됩니다"
-                className="whitespace-nowrap rounded border border-green-300 bg-white px-2 py-1.5 text-xs text-green-700 hover:bg-green-50 disabled:opacity-50">
-                {isPending ? '…' : '저장'}
-              </button>
-            )}
-            {siteAddrSaved && <span className="self-center whitespace-nowrap text-xs text-green-700">✓</span>}
-          </div>
+          <label className="mb-0.5 block text-xs text-gray-500">
+            현장주소
+            {siteAddress && <span className="ml-1 font-semibold text-green-600">✓ 자동 매핑</span>}
+          </label>
+          {siteAddress ? (
+            // 현장 정보(대시보드)에 저장된 주소를 그대로 쓴다 — 단일 입력 지점, 여기서는 수정하지 않는다
+            <p className="truncate rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm text-gray-600" title={siteAddress}>
+              {siteAddress}
+            </p>
+          ) : (
+            // 아직 미등록이면 이 자리에서 첫 입력을 받는다 (저장 시 대시보드 현장 정보와 동일한 곳에 기록)
+            <div className="flex gap-1">
+              <input
+                type="text" value={siteAddr} onChange={(e) => setSiteAddr(e.target.value)}
+                placeholder="예: 충북 청주시 상당구 ○○로 123"
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+              />
+              {siteAddr.trim() && (
+                <button type="button" onClick={handleSaveSiteAddress} disabled={isPending}
+                  title="현장주소로 저장 — 다음부터 모든 인원·모든 산출에 자동 입력됩니다"
+                  className="whitespace-nowrap rounded bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50">
+                  {isPending ? '…' : '저장'}
+                </button>
+              )}
+              {siteAddrSaved && <span className="self-center whitespace-nowrap text-xs text-green-700">✓</span>}
+            </div>
+          )}
+          <p className="mt-0.5 text-[11px] text-gray-400">
+            {siteAddress ? '대시보드 · 현장 정보에서 수정할 수 있습니다.' : '한 번 저장하면 대시보드 · 현장 정보에 남아 모든 산출에 자동 반영됩니다.'}
+          </p>
         </div>
         <div>
           <label className="mb-0.5 block text-xs text-gray-500">편도거리 (km)</label>
@@ -289,13 +303,16 @@ export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAdd
             <span>1회 왕복 교통비</span>
             <span>{formatKRW(preview.costPerTrip)}</span>
           </div>
+          {/* 적용 = 이 시트의 마무리 동작 — 누르면 값이 카드에 반영되고 시트가 닫힌다 */}
           <button
             type="button"
             onClick={handleApply}
-            className="mt-1 w-full rounded-md bg-blue-600 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-700"
           >
-            이 금액을 1회 왕복비로 적용
+            {formatKRW(preview.costPerTrip)}을 1회 왕복비로 적용
+            <span aria-hidden="true">→</span>
           </button>
+          <p className="text-center text-[11px] text-gray-400">적용하면 이 창이 닫히고 인원 카드에 반영됩니다.</p>
         </div>
       )}
     </div>

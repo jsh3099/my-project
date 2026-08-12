@@ -3,9 +3,9 @@ import fs from 'fs'
 import path from 'path'
 import { extractPdfLines, parseResidentDays } from '../parseSheet'
 
-// 사용자 배포용 테스트 출근부(바탕화면 테스트영수증 폴더)가 파서와 계속 맞는지 확인한다.
+// 사용자 배포용 테스트 출근부(바탕화면 테스트증빙_5회차 폴더)가 파서와 계속 맞는지 확인한다.
 // 명부 이름을 바꾸면(정상운 → 성혁기) 이 파일도 함께 다시 만들어야 한다.
-const SHEET = 'C:/Users/user/Desktop/웹사이트(정산서)/테스트영수증/테스트_출근부_상주_2026-04~08.pdf'
+const SHEET = 'C:/Users/user/Desktop/테스트증빙_5회차/1.테스트_출근부_상주_2026-04~08.pdf'
 const NAMES = ['강희철', '성혁기']
 
 describe.skipIf(!fs.existsSync(SHEET))('배포용 테스트 출근부 (상주 2026-04~08)', () => {

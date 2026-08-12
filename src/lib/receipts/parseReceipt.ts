@@ -36,6 +36,27 @@ export function parseMaintItems(lines: string[]): ParsedMaintItem[] {
   return items
 }
 
+// ── 거주지 증빙 주소 인식 ────────────────────────────────────────
+// 재직증명서·주민등록등본 등에서 자택주소를 뽑아 교통비 산출의 출발지 제안값으로 쓴다.
+// "주소  충북 충주시 …" 처럼 라벨과 값이 같은 행에 있는 표 형식을 대상으로 하며,
+// 인식값은 제안일 뿐 사용자가 확인·수정한다 (금액 인식과 같은 철학).
+
+const ADDR_LABEL = /^(?:주\s*소|현\s*주\s*소|자\s*택\s*주\s*소|주민등록\s*주소|거\s*주\s*지(?:\s*주소)?)\s*[:：]?\s*(.+)$/
+// 행정구역 토큰이 있어야 주소로 인정한다 (라벨만 있고 값이 다른 칸인 경우를 걸러낸다)
+const ADDR_REGION = /(특별시|광역시|특별자치시|특별자치도|[가-힣]{2,}도\s|[가-힣]{2,}시|[가-힣]{2,}군|[가-힣]{2,}구)/
+
+export function parseResidenceAddress(lines: string[]): string {
+  for (const line of lines) {
+    const m = line.match(ADDR_LABEL)
+    if (!m) continue
+    const addr = m[1].trim().replace(/\s{2,}/g, ' ')
+    if (addr.length < 6 || addr.length > 200) continue
+    if (!ADDR_REGION.test(addr)) continue
+    return addr
+  }
+  return ''
+}
+
 // ── 현장경비 범용 영수증 인식 ────────────────────────────────────
 // 양식이 제각각이라(주문서·세금계산서·카드영수증 등) 확실한 것만 뽑는다:
 // 금액은 합계 키워드 줄 우선, 일자는 문서의 첫 날짜, 구매처는 상호 키워드 줄 → 파일명 순 추정.

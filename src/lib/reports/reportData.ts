@@ -7,7 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildCategorySummaryTree, type CategoryTotal } from '@/lib/expenseSummaryTree'
 import { calcClaim, type ClaimItemResult } from '@/lib/settlement'
 import { EXPENSE_CATEGORY_LABELS, type ExpenseCategory } from '@/lib/constants'
-import type { Expense, ExpenseItem, CommuteCalc, TripVisit, WelfareSettlement, SettlementRound, SettlementRoundItem, Site, CompanyProfile } from '@/types'
+import type { Expense, ExpenseItem, CommuteCalc, TripVisit, WelfareSettlement, SettlementRound, SettlementRoundItem, Site, CompanyProfile, SiteStaffMember } from '@/types'
 
 export interface PersonExpense extends Expense {
   items: ExpenseItem[]
@@ -28,6 +28,8 @@ export interface SettlementReportData {
   unpaidAmount: number                    // 잔액 초과 사용분 (청구 불가)
   summaryTree: CategoryTotal[]            // 항목별 사용금액 (3번 표) — 인정금액 기준
   expenses: PersonExpense[]               // 세부 시트 원천 (자식 테이블 포함)
+  /** 인원별 거주지 증빙(재직증명서 등) 첨부 여부 — 성명 → 첨부 URL 목록 (명부 원천, 교통비·출장비 산출서 붙임 표기용) */
+  residenceDocsByName: Record<string, string[]>
   periodLabel: string                     // 금회 정산기간 표기
   /**
    * 잠정본 여부 — 확정 전(진행 중 회차 또는 미편입 지출) 집계로 만든 미리보기.
@@ -180,6 +182,18 @@ export async function getSettlementReportData(
     ? `${round.period_start.replaceAll('-', '.')}~${round.period_end.replaceAll('-', '.')}`
     : '미확정 (잠정)'
 
+  // 인원별 거주지 증빙 (명부 원천) — 교통비·출장비 산출서에 "붙임: 거주지 증빙" 표기용.
+  // 정산 데이터의 인원 식별자는 이름(target_user_name)이므로 이름으로 매칭한다.
+  const { data: memberRows } = await admin
+    .from('site_staff_members')
+    .select('name, residence_doc_urls')
+    .eq('site_id', siteId)
+    .eq('is_active', true)
+  const residenceDocsByName: Record<string, string[]> = {}
+  for (const m of (memberRows ?? []) as Pick<SiteStaffMember, 'name' | 'residence_doc_urls'>[]) {
+    if ((m.residence_doc_urls ?? []).length > 0) residenceDocsByName[m.name] = m.residence_doc_urls
+  }
+
   return {
     site: site as Site,
     company: (company as CompanyProfile) ?? null,
@@ -192,6 +206,7 @@ export async function getSettlementReportData(
     unpaidAmount,
     summaryTree,
     expenses: enriched,
+    residenceDocsByName,
     periodLabel,
     isProvisional: round?.status !== 'confirmed',
   }

@@ -5,7 +5,7 @@
 //   → 340.2 × 1,659.88 ÷ 11.97 = 47,176원 (반올림)
 //
 // mode:
-//   lodging_return — 숙박형(원거리): multiplier = 월 귀가 횟수 (월 4회 원칙)
+//   lodging_return — 숙박형(원거리): multiplier = 주말 왕복 횟수 (월 4회 원칙 × 기성기간 개월수)
 //   daily_commute  — 출퇴근형(근거리): multiplier = 근무일수 (출근부 기준)
 
 import type { CommuteMode } from '@/lib/constants'
@@ -16,7 +16,7 @@ export interface CommuteCalcInput {
   fuelEfficiency: number   // km/L (또는 km/kWh, km/kg)
   fuelPrice: number        // 원/L
   tollRoundtrip: number    // 왕복 통행료
-  multiplier: number       // 월횟수 또는 근무일수
+  multiplier: number       // 주말 왕복 횟수(기성기간 전체) 또는 근무일수
 }
 
 export interface CommuteCalcResult {

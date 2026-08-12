@@ -383,7 +383,7 @@ export async function createStaffCosts(formData: FormData) {
       child: { maintItems },
     })
 
-    // 교통비: 1회 왕복비 × (숙박형: 월횟수 / 출퇴근형: 근무일수) — 산출 파라미터가 있으면 서버 재계산
+    // 교통비: 1회 왕복비 × (숙박형: 주말 왕복 횟수 / 출퇴근형: 근무일수) — 산출 파라미터가 있으면 서버 재계산
     const multiplier = row.commuteMode === 'daily_commute' ? row.workDays : row.commuteTrips
     let costPerTrip = row.commuteRoundtrip
     if (row.commuteCalc) {

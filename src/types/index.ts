@@ -78,6 +78,10 @@ export type SiteStaffMember = {
   staff_type: StaffType
   /** 상주기술인 거주 형태 — lodging=숙소 사용, commute=자가 출퇴근(숙소비 없음) */
   residence_type: ResidenceType
+  /** 거주지 증빙 첨부 (재직증명서·주민등록등본 등) — 교통비 산출의 자택주소 근거. #프래그먼트에 원본 파일명 */
+  residence_doc_urls: string[]
+  /** 자택주소 — 교통비·출장비 산출의 출발지. 거주지 증빙 PDF에서 인식해 채우고 수정 가능 */
+  home_address: string | null
   is_active: boolean
   sort_order: number
   created_by: string | null

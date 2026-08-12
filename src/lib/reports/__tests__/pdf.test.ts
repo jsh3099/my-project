@@ -118,6 +118,8 @@ const data: SettlementReportData = {
     expenses.map((e) => ({ category: e.category, subcategory: e.subcategory, amount: e.amount - (e.over_limit_amount ?? 0), amount_gross: e.amount_gross })),
   ),
   expenses,
+  // 김책임은 거주지 증빙(재직증명서) 첨부 — 교통비 섹션에 붙임 문구가 나와야 한다
+  residenceDocsByName: { '김책임': ['https://example.test/receipts/staff-docs/doc.pdf#%EC%9E%AC%EC%A7%81%EC%A6%9D%EB%AA%85%EC%84%9C.pdf'] },
   periodLabel: '2026.05.01~2026.07.31',
   isProvisional: false,
 } as unknown as SettlementReportData
@@ -135,6 +137,8 @@ describe('정산서 PDF (F-22)', () => {
     }
     // 미지급 경고(F-23 계열 각주) 포함
     expect(flat).toContain('청구 대상에서 제외')
+    // 거주지 증빙 붙임 — 명부에 첨부된 인원(김책임)만 나열된다
+    expect(flat).toContain('거주지 증빙(재직증명서 등) — 김책임 각 1부.')
   })
 
   it('교통비·출장비 산출서가 경로 데이터로 자동 생성된다', () => {

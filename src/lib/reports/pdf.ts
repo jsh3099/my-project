@@ -144,6 +144,15 @@ function sectionTitle(text: string, extra: Partial<ContentText> & object = {}): 
   return { text, bold: true, fontSize: 10, margin: [0, 6, 0, 2], ...extra }
 }
 
+// 거주지 증빙(재직증명서 등) 붙임 문구 — 대상 인원 중 명부에 증빙이 첨부된 사람만 나열.
+// 교통비·출장비는 자택↔현장 거리로 산출하므로 자택주소의 근거 서류를 함께 표기한다.
+function residenceDocNote(data: SettlementReportData, targets: PersonExpense[]): string | null {
+  const names = [...new Set(targets.map((e) => e.target_user_name).filter(Boolean))] as string[]
+  const withDoc = names.filter((n) => ((data.residenceDocsByName ?? {})[n] ?? []).length > 0)
+  if (withDoc.length === 0) return null
+  return `붙임 : 거주지 증빙(재직증명서 등) — ${withDoc.join(', ')} 각 1부.`
+}
+
 function attachNote(text: string): Content {
   return { text, fontSize: 8, margin: [0, 0, 0, 8] }
 }
@@ -441,6 +450,8 @@ function buildCommuteSection(data: SettlementReportData, sectionNo: Map<string, 
     ),
     attachNote('붙임 : 교통비 산출서 각 1부.'),
   ]
+  const docNote = residenceDocNote(data, commutes)
+  if (docNote) out.push(attachNote(docNote))
 
   // 자차 산출 상세 (commute_calcs가 있는 인원)
   const withCalc = commutes.filter((e) => e.commuteCalc)
@@ -684,6 +695,8 @@ function buildTripSection(data: SettlementReportData, sectionNo: Map<string, str
     ),
     attachNote('붙임 : 출장비 산출서, 출근부 각 1부.'),
   ]
+  const tripDocNote = residenceDocNote(data, trips)
+  if (tripDocNote) out.push(attachNote(tripDocNote))
 
   // 인원별 방문일 상세
   for (const e of trips) {

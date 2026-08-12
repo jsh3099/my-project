@@ -27,6 +27,15 @@ function personLabel(e: { target_user_name: string | null; specialty: string | n
   return e.specialty ? `${name}(${e.specialty})` : name
 }
 
+// 거주지 증빙(재직증명서 등) 붙임 문구 — 대상 인원 중 명부에 증빙이 첨부된 사람만 나열.
+// 교통비·출장비는 자택↔현장 거리로 산출하므로 자택주소의 근거 서류를 함께 표기한다.
+function residenceDocNote(data: SettlementReportData, targets: PersonExpense[]): string | null {
+  const names = [...new Set(targets.map((e) => e.target_user_name).filter(Boolean))] as string[]
+  const withDoc = names.filter((n) => ((data.residenceDocsByName ?? {})[n] ?? []).length > 0)
+  if (withDoc.length === 0) return null
+  return `붙임 : 거주지 증빙(재직증명서 등) — ${withDoc.join(', ')} 각 1부.`
+}
+
 function periodLabel(e: { period_start: string | null; period_end: string | null }): string {
   if (!e.period_start && !e.period_end) return ''
   return `${fmtDate(e.period_start)}~${fmtDate(e.period_end)}`
@@ -326,6 +335,8 @@ function buildCommuteSheet(wb: ExcelJS.Workbook, data: SettlementReportData, sec
   const t = addRow(ws, ['합 계', '', '', '', '', '', '', total, ''], { bold: true, fill: SUBTOTAL_FILL })
   ws.mergeCells(t.number, 1, t.number, 7)
   ws.addRow(['붙임 : 교통비 산출서 각 1부.'])
+  const docNote = residenceDocNote(data, commutes)
+  if (docNote) ws.addRow([docNote])
 
   // 자차 산출 상세 (commute_calcs가 있는 인원)
   const withCalc = commutes.filter((e) => e.commuteCalc)
@@ -433,6 +444,8 @@ function buildTripSheet(wb: ExcelJS.Workbook, data: SettlementReportData, sectio
   const t = addRow(ws, ['합 계', '', total, '', '', '', '', '', '', '', ''], { bold: true, fill: SUBTOTAL_FILL })
   ws.mergeCells(t.number, 3, t.number, 10)
   ws.addRow(['붙임 : 출장비 산출서, 출근부 각 1부.'])
+  const tripDocNote = residenceDocNote(data, trips)
+  if (tripDocNote) ws.addRow([tripDocNote])
 
   // 인원별 방문일 상세
   for (const e of trips) {

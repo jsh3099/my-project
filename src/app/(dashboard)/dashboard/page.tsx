@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { PlusCircle, ClipboardList, AlertTriangle, CheckCircle, Clock, TrendingUp, Wallet } from 'lucide-react'
 import { EXPENSE_CATEGORY_LABELS, EXPENSE_STATUS_LABELS, type ExpenseCategory } from '@/lib/constants'
+import { SiteAddressCard } from '@/components/sites/SiteAddressCard'
 import type { Expense, Site, SettlementRoundItem } from '@/types'
 
 function formatKRW(n: number) {
@@ -31,7 +32,7 @@ export default async function DashboardPage() {
   // 배정된 현장 목록
   const { data: assignments } = await supabase
     .from('user_site_assignments')
-    .select('site_id, sites(id, name, direct_expense_budget, status)')
+    .select('site_id, sites(id, name, address, direct_expense_budget, status)')
     .eq('user_id', user.id)
     .eq('is_active', true)
 
@@ -147,6 +148,13 @@ export default async function DashboardPage() {
 
       {sites.length > 0 && (
         <>
+          {/* 현장 정보 — 현장주소의 단일 입력 지점 (교통비·출장비 산출에 자동 매핑) */}
+          <div className="space-y-2">
+            {sites.map((s) => (
+              <SiteAddressCard key={s.id} siteId={s.id} siteName={s.name} address={s.address ?? ''} />
+            ))}
+          </div>
+
           {/* 요약 카드 4개 */}
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">

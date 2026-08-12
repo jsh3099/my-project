@@ -2,8 +2,10 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import type { StaffType, ResidenceType } from '@/lib/constants'
 import { extractPdfLines, parseResidentDays, parseSupportVisits } from '@/lib/attendance/parseSheet'
+import { parseResidenceAddress } from '@/lib/receipts/parseReceipt'
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
@@ -68,7 +70,10 @@ export async function upsertAttendance(formData: FormData) {
       return { error: '출근부 파일 업로드에 실패했습니다: ' + uploadError.message }
     }
     const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(path)
-    newUrls.push(urlData.publicUrl)
+    // 원본 파일명은 URL 프래그먼트로 함께 보관한다 — 화면 첨부 칩이 "어떤 출근부인지" 보여줘야 하는데,
+    // 스토리지 키에는 한글·`~`를 넣을 수 없다(Invalid key). 프래그먼트는 서버로 전송되지 않아
+    // 링크 열기·다운로드에는 영향이 없다.
+    newUrls.push(`${urlData.publicUrl}#${encodeURIComponent(file.name)}`)
   }
 
   // 기존 첨부 유지 목록 (화면에서 삭제한 파일은 제외되어 넘어온다)
@@ -292,6 +297,184 @@ export async function updateSiteStaffResidence(memberId: string, residenceType: 
 
   revalidatePath('/attendance')
   revalidatePath('/expenses/staff-costs/resident')
+  return { success: true }
+}
+
+// 거주지 증빙 첨부 (재직증명서·주민등록등본 등) — 명부 인원 단위.
+// 교통비(자택↔현장 거리) 산출의 자택주소를 뒷받침하는 서류라 회차가 아닌 사람에 딸린다.
+// 한 번 첨부하면 모든 회차에 적용되고, 주소 변경 시에만 교체한다.
+export async function uploadResidenceDoc(memberId: string, formData: FormData) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '인증이 필요합니다.' }
+
+  const { data: member } = await supabase
+    .from('site_staff_members')
+    .select('id, site_id, residence_doc_urls, home_address')
+    .eq('id', memberId)
+    .maybeSingle()
+  if (!member) return { error: '명부 인원을 찾을 수 없습니다.' }
+
+  const files = (formData.getAll('doc_files') as File[]).filter((f) => f.size > 0)
+  if (files.length === 0) return { error: '첨부할 파일을 선택하세요.' }
+
+  const newUrls: string[] = []
+  for (const file of files) {
+    const ext = file.name.split('.').pop()
+    const path = `staff-docs/${member.site_id}/${member.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+    const { error: uploadError } = await supabase.storage
+      .from('receipts')
+      .upload(path, file, { contentType: file.type })
+    if (uploadError) {
+      console.error('Residence doc upload error:', uploadError)
+      return { error: '거주지 증빙 업로드에 실패했습니다: ' + uploadError.message }
+    }
+    const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(path)
+    // 원본 파일명은 URL 프래그먼트로 보관 (출근부 첨부와 같은 관례 — 스토리지 키에 한글 불가)
+    newUrls.push(`${urlData.publicUrl}#${encodeURIComponent(file.name)}`)
+  }
+
+  // 첨부 PDF에서 자택주소를 인식해 채운다 — 교통비·출장비 산출의 출발지가 되는 값이라
+  // 증빙과 같은 서류에서 옮겨 적는 수고를 없앤다. 이미 주소가 있으면 덮어쓰지 않는다
+  // (사용자가 고쳐둔 값이 인식값에 밀리면 안 된다). 인식 실패는 오류가 아니다 — 직접 입력하면 된다.
+  let parsedAddress = ''
+  if (!member.home_address) {
+    const pdfs = files.filter(
+      (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'),
+    )
+    try {
+      for (const f of pdfs) {
+        const lines = await extractPdfLines(new Uint8Array(await f.arrayBuffer()))
+        parsedAddress = parseResidenceAddress(lines)
+        if (parsedAddress) break
+      }
+    } catch (e) {
+      console.error('Residence doc address parse error:', e)
+    }
+  }
+
+  const { error } = await supabase
+    .from('site_staff_members')
+    .update({
+      residence_doc_urls: [...(member.residence_doc_urls ?? []), ...newUrls],
+      ...(parsedAddress ? { home_address: parsedAddress } : {}),
+    })
+    .eq('id', memberId)
+  if (error) return { error: '거주지 증빙 저장에 실패했습니다: ' + error.message }
+
+  revalidatePath('/attendance')
+  revalidatePath('/expenses/staff-costs/resident')
+  revalidatePath('/expenses/staff-costs/support')
+  return { success: true, parsedAddress }
+}
+
+// 저장된 공개 URL에서 스토리지 경로를 되돌린다 (#원본파일명 프래그먼트 제거)
+function storagePathFromUrl(url: string): string | null {
+  const bare = url.split('#')[0]
+  const marker = '/object/public/receipts/'
+  const i = bare.indexOf(marker)
+  if (i < 0) return null
+  return decodeURIComponent(bare.slice(i + marker.length))
+}
+
+// 이미 첨부된 거주지 증빙에서 자택주소를 다시 인식한다.
+// 첨부는 업로드 시점에만 인식하므로, 기능이 없던 때 올린 증빙이나 인식 실패분을 위해 필요하다.
+export async function reparseResidenceAddress(memberId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '인증이 필요합니다.' }
+
+  // 멤버 조회는 사용자 권한(RLS)으로 — 볼 수 있는 인원의 증빙만 다시 읽는다
+  const { data: member } = await supabase
+    .from('site_staff_members')
+    .select('id, residence_doc_urls')
+    .eq('id', memberId)
+    .maybeSingle()
+  if (!member) return { error: '명부 인원을 찾을 수 없습니다.' }
+
+  const urls = (member.residence_doc_urls ?? []).filter((u: string) =>
+    u.split('#')[0].toLowerCase().endsWith('.pdf'),
+  )
+  if (urls.length === 0) {
+    return { error: '인식할 PDF 증빙이 없습니다. 주소를 직접 입력하세요. (사진·스캔 이미지는 인식 대상이 아닙니다)' }
+  }
+
+  // 저장소는 비공개라 공개 URL로는 못 읽는다 — 서비스 권한으로 내려받아 텍스트만 추출한다
+  const admin = createAdminClient()
+  let parsed = ''
+  for (const url of urls) {
+    const path = storagePathFromUrl(url)
+    if (!path) continue
+    const { data: blob, error: dlError } = await admin.storage.from('receipts').download(path)
+    if (dlError || !blob) {
+      console.error('Residence doc download error:', dlError)
+      continue
+    }
+    try {
+      const lines = await extractPdfLines(new Uint8Array(await blob.arrayBuffer()))
+      parsed = parseResidenceAddress(lines)
+      if (parsed) break
+    } catch (e) {
+      console.error('Residence doc reparse error:', e)
+    }
+  }
+  if (!parsed) {
+    return { error: '증빙에서 주소를 찾지 못했습니다. 주소를 직접 입력하세요.' }
+  }
+
+  const { error } = await supabase
+    .from('site_staff_members')
+    .update({ home_address: parsed })
+    .eq('id', memberId)
+  if (error) return { error: '자택주소 저장에 실패했습니다: ' + error.message }
+
+  revalidatePath('/attendance')
+  revalidatePath('/expenses/staff-costs/resident')
+  revalidatePath('/expenses/staff-costs/support')
+  return { success: true, parsedAddress: parsed }
+}
+
+// 자택주소 직접 입력·수정 — 인식값이 틀렸거나 증빙이 이미지(스캔)일 때 쓴다
+export async function updateStaffHomeAddress(memberId: string, address: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '인증이 필요합니다.' }
+
+  const value = address.trim()
+  if (value.length > 200) return { error: '자택주소가 너무 깁니다.' }
+
+  const { error } = await supabase
+    .from('site_staff_members')
+    .update({ home_address: value || null })
+    .eq('id', memberId)
+  if (error) return { error: '자택주소 저장에 실패했습니다: ' + error.message }
+
+  revalidatePath('/attendance')
+  revalidatePath('/expenses/staff-costs/resident')
+  revalidatePath('/expenses/staff-costs/support')
+  return { success: true }
+}
+
+// 거주지 증빙 제거 — 잘못 올린 파일 교체용 (스토리지 원본은 보존, 참조만 끊는다)
+export async function removeResidenceDoc(memberId: string, url: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '인증이 필요합니다.' }
+
+  const { data: member } = await supabase
+    .from('site_staff_members')
+    .select('id, residence_doc_urls')
+    .eq('id', memberId)
+    .maybeSingle()
+  if (!member) return { error: '명부 인원을 찾을 수 없습니다.' }
+
+  const { error } = await supabase
+    .from('site_staff_members')
+    .update({ residence_doc_urls: (member.residence_doc_urls ?? []).filter((u: string) => u !== url) })
+    .eq('id', memberId)
+  if (error) return { error: '거주지 증빙 제거에 실패했습니다: ' + error.message }
+
+  revalidatePath('/attendance')
   return { success: true }
 }
 

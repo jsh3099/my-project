@@ -73,8 +73,8 @@ export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; lab
       value: 'commute',
       label: '교통비',
       limitType: 'commute',
-      requireDocs: ['출근부', '교통비 산출서 (지도 경로·거리)', '자차 이용 시 통행료·연비계산서'],
-      notes: '상주기술인 한정 · 숙박형: 왕복비 × 월횟수(귀가 월4회 원칙) / 출퇴근형: 왕복비 × 근무일수',
+      requireDocs: ['출근부', '교통비 산출서 (지도 경로·거리)', '자차 이용 시 통행료·연비계산서', '거주지 증빙 (재직증명서 등)'],
+      notes: '상주기술인 한정 · 숙박형: 왕복비 × 주말 왕복 횟수(월 4회 원칙 × 기성기간 개월수) / 출퇴근형: 왕복비 × 근무일수',
       entryType: 'auto_recurring',
       midCategory: 'transport',
     },
@@ -175,7 +175,7 @@ export const EXPENSE_SUBCATEGORIES: Record<ExpenseCategory, { value: string; lab
     {
       value: 'support_trip',
       label: '기술지원 출장비',
-      requireDocs: ['출장비 산출서 (지도 경로·거리)', '출근부'],
+      requireDocs: ['출장비 산출서 (지도 경로·거리)', '출근부', '거주지 증빙 (재직증명서 등)'],
       notes: '방문일별 자동산출 · 왕복유류비 + 통행료 + 일비 + 식비 (공무원 여비규정)',
       entryType: 'auto_trip',
     },
@@ -291,7 +291,8 @@ export const STAFF_TYPE_LABELS: Record<StaffType, string> = {
 export const SPECIALTIES = ['책임', '건축', '토목', '기계', '전기', '통신', '안전', '소방', '조경'] as const
 
 // ── 상주기술인 교통비 유형 ──────────────────────────────────
-// lodging_return: 숙박형(원거리) — 자택↔현장 왕복비 × 월횟수 (주말 귀가, 월4회 원칙)
+// lodging_return: 숙박형(원거리) — 자택↔현장 왕복비 × 주말 왕복 횟수
+//                 (주말마다 귀가·복귀, 월 4회 원칙 → 기성기간 전체 횟수 = 월 4회 × 개월수)
 // daily_commute : 출퇴근형(근거리) — 자택↔현장 왕복비 × 근무일수 (숙소비 없음)
 export const COMMUTE_MODES = {
   LODGING_RETURN: 'lodging_return',
@@ -301,7 +302,7 @@ export const COMMUTE_MODES = {
 export type CommuteMode = (typeof COMMUTE_MODES)[keyof typeof COMMUTE_MODES]
 
 export const COMMUTE_MODE_LABELS: Record<CommuteMode, string> = {
-  lodging_return: '숙박형 (월횟수)',
+  lodging_return: '숙박형 (주말 왕복)',
   daily_commute: '출퇴근형 (근무일수)',
 }
 
@@ -331,7 +332,7 @@ export const RESIDENCE_TYPE_SHORT: Record<ResidenceType, string> = {
   commute: '출퇴근',
 }
 
-// 거주 형태 ↔ 교통비 유형은 1:1로 대응한다 (숙소 사용=주말 귀가, 자가 출퇴근=매일 왕복)
+// 거주 형태 ↔ 교통비 유형은 1:1로 대응한다 (숙소 사용=주말 왕복, 자가 출퇴근=매일 왕복)
 export const residenceToCommuteMode = (r: ResidenceType): CommuteMode =>
   r === 'commute' ? 'daily_commute' : 'lodging_return'
 

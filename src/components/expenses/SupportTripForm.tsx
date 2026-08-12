@@ -72,7 +72,8 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
       specialty: m.specialty && (SPECIALTIES as readonly string[]).includes(m.specialty)
         ? m.specialty
         : SPECIALTIES[i % SPECIALTIES.length],
-      originAddress: '', distanceOneway: '', fuelType: 'gasoline' as VehicleFuelType,
+      // 자택주소(출발지) — 출근부 화면에서 거주지 증빙으로 채운 명부 값이 자동 매핑된다
+      originAddress: m.home_address ?? '', distanceOneway: '', fuelType: 'gasoline' as VehicleFuelType,
       visits: visitDatesOf(m.id), mapFile: null,
     }))
   )
@@ -337,7 +338,7 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
                   {r.mapFile ? `📎 ${r.mapFile.name}` : '📎 캡처 첨부 (카카오맵 등)'}
                 </button>
               </div>
-              <span className="pb-1.5 text-[11px] text-gray-400">현장: {siteAddress || '주소 미등록 — 주재비 화면의 자차 산출에서 저장'} · 자택↔현장 왕복 기준 · 왕복유류비 = 편도 × 2 ÷ 연비 × 당일 유가</span>
+              <span className="pb-1.5 text-[11px] text-gray-400">현장: {siteAddress || '주소 미등록 — 대시보드 · 현장 정보에서 입력'} · 자택↔현장 왕복 기준 · 왕복유류비 = 편도 × 2 ÷ 연비 × 당일 유가</span>
             </div>
 
             {/* 방문일 목록 — 월별 그룹 */}
