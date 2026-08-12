@@ -47,6 +47,8 @@ interface Props {
   myUserId?: string
   myHomeAddress?: string | null
   myFuelType?: string | null
+  /** 현장주재비 비목의 계상 잔액 (계상 미입력이면 null) — 삭감 위험 사전 인지용 */
+  categoryRemaining?: number | null
 }
 
 const ACCEPT = '.jpg,.jpeg,.png,.pdf'
@@ -435,7 +437,7 @@ function LodgingPanel({ r, onChange, onSave, saveState }: {
 // 표에 뜨는 기본 인원: 명부 인원(key=m_{memberId})
 type BasePerson = { key: string; name: string; defaultSpecialty: string | null; residenceType: ResidenceType }
 
-export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance, existingDrafts = [], defaultPeriodStart, defaultPeriodEnd, mealDailyLimit = 25000, applyCommuteRegulation = true, commuteTripsDefault = 4, siteAddress, myUserId, myHomeAddress, myFuelType }: Props) {
+export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance, existingDrafts = [], defaultPeriodStart, defaultPeriodEnd, mealDailyLimit = 25000, applyCommuteRegulation = true, commuteTripsDefault = 4, siteAddress, myUserId, myHomeAddress, myFuelType, categoryRemaining = null }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -1104,9 +1106,19 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
           <h2 className="text-base font-semibold text-gray-800">{siteName}</h2>
           <p className="text-sm text-gray-500">{year}년 {parseInt(mon)}월 인원별 주재비 정산</p>
         </div>
-        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-          합계 {grandTotal.toLocaleString()}원
-        </span>
+        <div className="text-right">
+          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+            합계 {grandTotal.toLocaleString()}원
+          </span>
+          {/* 계상 잔액 — 발주청 정산(매 기성·준공)은 증빙으로 채운 만큼만 지급되므로 입력 화면에서 먼저 보인다 */}
+          {categoryRemaining !== null && (
+            <p className={`mt-1 text-[11px] ${categoryRemaining < 0 ? 'font-semibold text-red-500' : 'text-gray-400'}`}>
+              {categoryRemaining < 0
+                ? `현장주재비 계상 초과 ${(-categoryRemaining).toLocaleString()}원 — 총액 내 흡수 여부 확인 필요`
+                : `현장주재비 계상 잔액 ${categoryRemaining.toLocaleString()}원`}
+            </p>
+          )}
+        </div>
       </div>
 
       {error && <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}

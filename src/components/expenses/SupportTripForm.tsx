@@ -25,6 +25,8 @@ interface Props {
   siteAddress?: string | null
   tripDailyAllowance?: number
   tripMealAllowance?: number
+  /** 출장비 비목의 계상 잔액 (계상 미입력이면 null) — 삭감 위험 사전 인지용 */
+  categoryRemaining?: number | null
 }
 
 const ACCEPT = '.jpg,.jpeg,.png,.pdf'
@@ -47,7 +49,7 @@ let rowSeq = 0
 
 function parseNum(v: string) { return parseInt(v.replace(/,/g, ''), 10) || 0 }
 
-export function SupportTripForm({ siteId, siteName, yearMonth, members, attendance, siteAddress, tripDailyAllowance = 25000, tripMealAllowance = 25000 }: Props) {
+export function SupportTripForm({ siteId, siteName, yearMonth, members, attendance, siteAddress, tripDailyAllowance = 25000, tripMealAllowance = 25000, categoryRemaining = null }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -427,9 +429,19 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
             {year}년 {parseInt(mon)}월 기술지원 기술인 출장비 — 방문일별 왕복유류비 + 통행료 + 일비 {tripDailyAllowance.toLocaleString()}원 + 식비 {tripMealAllowance.toLocaleString()}원
           </p>
         </div>
-        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-          합계 {grandTotal.toLocaleString()}원
-        </span>
+        <div className="text-right">
+          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+            합계 {grandTotal.toLocaleString()}원
+          </span>
+          {/* 계상 잔액 — 발주청 정산(매 기성·준공)은 증빙으로 채운 만큼만 지급되므로 입력 화면에서 먼저 보인다 */}
+          {categoryRemaining !== null && (
+            <p className={`mt-1 text-[11px] ${categoryRemaining < 0 ? 'font-semibold text-red-500' : 'text-gray-400'}`}>
+              {categoryRemaining < 0
+                ? `출장비 계상 초과 ${(-categoryRemaining).toLocaleString()}원 — 총액 내 흡수 여부 확인 필요`
+                : `출장비 계상 잔액 ${categoryRemaining.toLocaleString()}원`}
+            </p>
+          )}
+        </div>
       </div>
 
       {error && <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}

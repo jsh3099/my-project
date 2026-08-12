@@ -424,6 +424,13 @@ export function SiteExpenseBoard({
   const sheetCard = sheetKey ? cards.find((c) => c.key === sheetKey) : undefined
   const sheetDef = sheetCard ? subDef(sheetCard.category, sheetCard.subcategory) : undefined
 
+  // 직접경비 총액 초과 미리보기 — 발주청 정산(매 기성·준공)에서 총액 초과분은 청구 불가(미지급)이므로
+  // 저장 전에 경고한다. 서버 집계(totalUsed, draft 포함·현장 전체)에 아직 저장 안 된 입력분을 얹는다.
+  const unsavedDelta = cards.reduce((s, c) => s + (computeCardTotal(c) - c.savedTotal), 0)
+  const projectedTotalRemaining =
+    budget && budget.totalBudget > 0 ? budget.totalBudget - budget.totalUsed - unsavedDelta : null
+  const overTotalAmount = projectedTotalRemaining !== null && projectedTotalRemaining < 0 ? -projectedTotalRemaining : 0
+
   // ── 카드 렌더 (렌더 함수 호출 — JSX 태그로 쓰면 렌더마다 리마운트되어 포커스가 유실된다) ──
   function renderCard(card: CardState) {
     const def = subDef(card.category, card.subcategory)
@@ -471,6 +478,12 @@ export function SiteExpenseBoard({
             <span className="whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">{validCount}건</span>
           )}
           <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${chipCls}`}>{chipLabel}</span>
+          {/* 금액은 있는데 증빙이 없으면 발주청 삭감 1순위 — 저장 전에 보이게 한다 */}
+          {validCount > 0 && card.receiptUrls.length === 0 && def.requireDocs.length > 0 && (
+            <span className="whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+              ⚠ 증빙 없음
+            </span>
+          )}
           {isWelfare && welfareOverTotal > 0 && (
             <span className="whitespace-nowrap rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600">
               한도 초과 {fmt(welfareOverTotal)}원 불인정
@@ -677,6 +690,14 @@ export function SiteExpenseBoard({
       </div>
 
       {error && <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+      {/* 총액 초과 경고 — 기성 확정 전에 알아야 증빙·계상 협의로 대응할 수 있다 */}
+      {overTotalAmount > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+          ⚠️ 직접경비 총액 잔액을 초과합니다 — 초과분 <b>{fmt(overTotalAmount)}원은 발주청에 청구할 수 없어
+          미지급될 수 있습니다.</b> 저장은 가능하지만 기성 확정 전에 본사 정산 담당자와 확인하세요.
+        </div>
+      )}
 
       <div className="space-y-3">
         {cards.map((c) => renderCard(c))}

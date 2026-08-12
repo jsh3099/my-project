@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { StaffCostForm, type StaffCostDraftItem } from '@/components/expenses/StaffCostForm'
 import { SupportTripForm } from '@/components/expenses/SupportTripForm'
+import { getSiteBudgetStatus } from '@/lib/budgetStatus'
 import type { StaffType, CommuteMode, VehicleFuelType } from '@/lib/constants'
 import { STAFF_TYPE_LABELS } from '@/lib/constants'
 import type { Site, Profile, AttendanceRecord, SiteStaffMember, SettlementRound, LodgingCalcDetail } from '@/types'
@@ -51,7 +52,7 @@ export async function StaffCostsPageContent({
   // 배정된 현장
   const { data: assignments } = await supabase
     .from('user_site_assignments')
-    .select('site_id, sites(id, name, address)')
+    .select('site_id, sites(id, name, address, direct_expense_budget)')
     .eq('user_id', user.id)
     .eq('is_active', true)
 
@@ -199,6 +200,12 @@ export async function StaffCostsPageContent({
   // 기술지원 기술인은 주재비가 아닌 출장비(방문일별 산출)로 정산한다 — 정산서 2-1
   const isSupport = staffType === 'support'
 
+  // 비목 계상 잔액 — 발주청 정산(매 기성·준공)은 증빙으로 채운 만큼만 지급되므로
+  // 입력 화면에서 삭감 위험을 먼저 보이게 한다 (used에는 draft 포함, 현장 전체 기준)
+  const budgetBySite = site ? await getSiteBudgetStatus(supabase, admin, [site]) : {}
+  const budgetCat = budgetBySite[siteId]?.byCategory[isSupport ? 'business_trip' : 'site_residence']
+  const categoryRemaining = budgetCat && budgetCat.budget > 0 ? budgetCat.budget - budgetCat.used : null
+
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-6">
       <div className="flex items-center gap-2">
@@ -242,6 +249,7 @@ export async function StaffCostsPageContent({
           siteAddress={site?.address}
           tripDailyAllowance={siteParams?.trip_daily_allowance ?? 25000}
           tripMealAllowance={siteParams?.trip_meal_allowance ?? 25000}
+          categoryRemaining={categoryRemaining}
         />
       ) : (
         <StaffCostForm
@@ -260,6 +268,7 @@ export async function StaffCostsPageContent({
           myUserId={user.id}
           myHomeAddress={me?.home_address}
           myFuelType={me?.vehicle_fuel_type}
+          categoryRemaining={categoryRemaining}
         />
       )}
     </div>
