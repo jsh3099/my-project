@@ -37,7 +37,42 @@ function ensureFonts() {
 
 export async function buildSettlementPdfBuffer(data: SettlementReportData): Promise<Buffer> {
   ensureFonts()
-  return pdfmake.createPdf(buildDocDefinition(data)).getBuffer()
+  const images = await collectCalcSheetImages(data)
+  return pdfmake.createPdf(buildDocDefinition(data, images)).getBuffer()
+}
+
+// ── 산출서 지도 캡처 수집 ──────────────────────────────────────
+// 교통비·출장비 산출서에 첨부된 지도 캡처(이미지)를 임베드한다.
+// 산출서 자체는 저장된 경로 데이터(카카오)로 자동 생성되므로 이미지는 보조 자료 —
+// 없거나 가져오기에 실패해도 산출서는 텍스트 근거만으로 완성된다.
+
+const CALC_IMG_MAX_BYTES = 8 * 1024 * 1024
+
+function calcSheetTargets(data: SettlementReportData): PersonExpense[] {
+  return data.expenses.filter(
+    (e) => recognized(e) > 0 && ((e.subcategory === 'commute' && e.commuteCalc) || e.subcategory === 'support_trip'),
+  )
+}
+
+export async function collectCalcSheetImages(data: SettlementReportData): Promise<Record<string, string>> {
+  const images: Record<string, string> = {}
+  await Promise.all(
+    calcSheetTargets(data).map(async (e) => {
+      const url = (e.receipt_urls ?? []).find((u) => /\.(png|jpe?g)(\?|$)/i.test(u))
+      if (!url) return
+      try {
+        const res = await fetch(url)
+        if (!res.ok) return
+        const buf = Buffer.from(await res.arrayBuffer())
+        if (buf.length === 0 || buf.length > CALC_IMG_MAX_BYTES) return
+        const mime = /\.png(\?|$)/i.test(url) ? 'image/png' : 'image/jpeg'
+        images[`calcimg_${e.id}`] = `data:${mime};base64,${buf.toString('base64')}`
+      } catch {
+        // 이미지 임베드 실패는 무시 — 산출서는 텍스트 근거로 완성
+      }
+    }),
+  )
+  return images
 }
 
 // ── 공통 헬퍼 ─────────────────────────────────────────────────
@@ -124,7 +159,7 @@ function pageStart(content: Content[], orientation: 'portrait' | 'landscape'): C
 
 // ── 문서 정의 ─────────────────────────────────────────────────
 
-export function buildDocDefinition(data: SettlementReportData): TDocumentDefinitions {
+export function buildDocDefinition(data: SettlementReportData, images: Record<string, string> = {}): TDocumentDefinitions {
   const sectionNo = buildSectionNumbers(data)
 
   const content: Content[] = [
@@ -132,12 +167,15 @@ export function buildDocDefinition(data: SettlementReportData): TDocumentDefinit
     ...pageStart(buildLodgingSection(data, sectionNo), 'landscape'),
     ...pageStart(buildMealSection(data, sectionNo), 'portrait'),
     ...pageStart(buildCommuteSection(data, sectionNo), 'landscape'),
+    ...pageStart(buildCommuteCalcSheets(data, images), 'portrait'),
     ...pageStart(buildItemizedSections(data, sectionNo), 'portrait'),
     ...pageStart(buildWelfareSection(data, sectionNo), 'portrait'),
     ...pageStart(buildTripSection(data, sectionNo), 'landscape'),
+    ...pageStart(buildTripCalcSheets(data, images), 'portrait'),
   ]
 
   return {
+    images,
     info: {
       title: '건설사업관리용역 직접경비 정산서',
       creator: 'CM 직접경비 정산 플랫폼',
@@ -395,13 +433,116 @@ function buildCommuteSection(data: SettlementReportData, sectionNo: Map<string, 
           const cc = e.commuteCalc!
           return [
             td(personLabel(e)), { text: cc.home_address ?? '', fontSize: 8 }, td(String(Number(cc.distance_oneway_km))),
-            td(`${cc.fuel_type}/${Number(cc.fuel_efficiency)}`), td(cc.fuel_price), td(fmtDate(cc.fuel_price_date)),
+            td(`${cc.fuel_type}/${Number(cc.fuel_efficiency)}`), td(cc.fuel_price),
+            td(cc.fuel_price_date ? fmtDate(cc.fuel_price_date) : '기간 평균'),
             td(cc.fuel_cost_roundtrip), td(cc.toll_roundtrip), td(cc.fuel_cost_roundtrip + cc.toll_roundtrip),
           ]
         }),
       ],
     ))
+    out.push(attachNote('※ 유가 등은 한국석유공사 유가정보서비스(www.opinet.co.kr)에서 고시된 유가를 적용함 (기간 평균 = 근무기간 내 고시일 평균)'))
   }
+  return out
+}
+
+// ── 교통비·출장비 산출서 (자동 생성) ─────────────────────────────
+// 발주청 이해를 돕기 위한 자체 서식 — 저장된 카카오 경로 데이터(주소·거리·통행료)와
+// 오피넷 유가로 인별 1장씩 생성한다. 지도 캡처가 첨부돼 있으면 함께 싣는다 (보조 자료).
+
+function calcSheetBlock(opts: {
+  title: string
+  specialty: string | null
+  name: string
+  imageKey: string | null
+  rows: [string, string][]
+  footnote: string
+  breakBefore: boolean
+}): Content[] {
+  const out: Content[] = []
+  const titleContent: Content = {
+    text: opts.title, fontSize: 13, bold: true, alignment: 'center', margin: [0, 0, 0, 6],
+  }
+  if (opts.breakBefore) (titleContent as unknown as Record<string, unknown>).pageBreak = 'before'
+  out.push(titleContent)
+  out.push(table(
+    [60, '*', 60, '*'],
+    [[th('공종'), td(opts.specialty ?? ''), th('성명'), td(opts.name)]],
+    { headerRows: 0 },
+  ))
+  if (opts.imageKey) {
+    out.push({ image: opts.imageKey, fit: [500, 330], alignment: 'center', margin: [0, 4, 0, 8] })
+  }
+  out.push(table(
+    [110, '*'],
+    opts.rows.map(([k, v]): TableCell[] => [th(k), { text: v, alignment: 'left' }]),
+    { headerRows: 0 },
+  ))
+  out.push(attachNote(opts.footnote))
+  return out
+}
+
+const OPINET_FOOTNOTE = '※ 유가 등은 한국석유공사 유가정보서비스(www.opinet.co.kr)에서 고시된 유가를 적용함'
+
+function buildCommuteCalcSheets(data: SettlementReportData, images: Record<string, string>): Content[] {
+  const targets = data.expenses.filter((e) => e.subcategory === 'commute' && e.commuteCalc && recognized(e) > 0)
+  if (targets.length === 0) return []
+  const out: Content[] = []
+  targets.forEach((e, i) => {
+    const cc = e.commuteCalc!
+    const oneway = Number(cc.distance_oneway_km)
+    const roundtrip = Math.round(oneway * 2 * 10) / 10
+    const priceBasis = cc.fuel_price_date
+      ? `오피넷 ${fmtDate(cc.fuel_price_date)} 고시`
+      : `근무기간(${periodLabel(e)}) 오피넷 평균`
+    const imageKey = images[`calcimg_${e.id}`] ? `calcimg_${e.id}` : null
+    out.push(...calcSheetBlock({
+      title: '상주기술인 교통비 산출서',
+      specialty: e.specialty,
+      name: e.target_user_name ?? '',
+      imageKey,
+      rows: [
+        ['현장주소', data.site.address ?? ''],
+        ['자택주소', cc.home_address ?? ''],
+        ['거리', `${oneway}km × 2(왕복) = ${roundtrip}km ${imageKey ? '(붙임 지도 경로)' : '(카카오 길찾기 산출)'}`],
+        ['유가', `${won(cc.fuel_price)}원 — ${priceBasis} · ${cc.fuel_type} 연비 ${Number(cc.fuel_efficiency)}`],
+        ['왕복 유류비', `${roundtrip}km × ${won(cc.fuel_price)}원 ÷ ${Number(cc.fuel_efficiency)} = ${won(cc.fuel_cost_roundtrip)}원`],
+        ['통행료(왕복)', `${won(cc.toll_roundtrip)}원`],
+        ['1회 왕복 교통비', `${won(cc.fuel_cost_roundtrip + cc.toll_roundtrip)}원`],
+      ],
+      footnote: OPINET_FOOTNOTE,
+      breakBefore: i > 0, // 첫 장은 pageStart가 페이지를 나눈다
+    }))
+  })
+  return out
+}
+
+function buildTripCalcSheets(data: SettlementReportData, images: Record<string, string>): Content[] {
+  const targets = data.expenses.filter((e) => e.subcategory === 'support_trip' && recognized(e) > 0)
+  if (targets.length === 0) return []
+  const out: Content[] = []
+  targets.forEach((e, i) => {
+    const detail = e.calc_detail as { originAddress?: string | null; distanceOnewayKm?: number; fuelType?: string } | null
+    const oneway = Number(detail?.distanceOnewayKm ?? 0)
+    const roundtrip = Math.round(oneway * 2 * 10) / 10
+    // 통행료는 방문일별 저장 — 산출서에는 대표값(첫 방문일의 왕복 통행료)을 근거로 싣는다
+    const toll = e.tripVisits.find((v) => v.toll > 0)?.toll ?? 0
+    const imageKey = images[`calcimg_${e.id}`] ? `calcimg_${e.id}` : null
+    out.push(...calcSheetBlock({
+      title: '기술지원기술인 출장비 산출서',
+      specialty: e.specialty,
+      name: e.target_user_name ?? '',
+      imageKey,
+      rows: [
+        ['현장주소', data.site.address ?? ''],
+        ['자택주소(출발지)', detail?.originAddress ?? ''],
+        ['거리', `${oneway}km × 2(왕복) = ${roundtrip}km ${imageKey ? '(붙임 지도 경로)' : '(카카오 길찾기 산출)'}`],
+        ['통행료(왕복)', `${won(toll)}원`],
+        ['유가', `방문일별 오피넷 고시가 적용 — 출장비 사용내역 상세 참조${detail?.fuelType ? ` · ${detail.fuelType}` : ''}`],
+      ],
+      footnote: OPINET_FOOTNOTE,
+      breakBefore: i > 0,
+    }))
+  })
   return out
 }
 

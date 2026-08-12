@@ -318,7 +318,7 @@ function buildCommuteSheet(wb: ExcelJS.Workbook, data: SettlementReportData, sec
     addRow(ws, ['성명', '자택주소', '편도거리(km)', '유종/연비', '유가', '유가기준일', '왕복유류비', '통행료(왕복)', '1회 왕복비'], { bold: true, fill: HEAD_FILL })
     for (const e of withCalc) {
       const c = e.commuteCalc!
-      addRow(ws, [personLabel(e), c.home_address ?? '', Number(c.distance_oneway_km), `${c.fuel_type}/${Number(c.fuel_efficiency)}`, c.fuel_price, fmtDate(c.fuel_price_date), c.fuel_cost_roundtrip, c.toll_roundtrip, c.fuel_cost_roundtrip + c.toll_roundtrip])
+      addRow(ws, [personLabel(e), c.home_address ?? '', Number(c.distance_oneway_km), `${c.fuel_type}/${Number(c.fuel_efficiency)}`, c.fuel_price, c.fuel_price_date ? fmtDate(c.fuel_price_date) : '기간 평균', c.fuel_cost_roundtrip, c.toll_roundtrip, c.fuel_cost_roundtrip + c.toll_roundtrip])
     }
   }
 }

@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { calcCommuteCost, saveMyTransportInfo } from '@/actions/commute'
 import { updateSiteAddress } from '@/actions/sites'
-import { getFuelPriceForDate } from '@/actions/fuelPrice'
+import { getFuelPriceForDate, getFuelPriceAverageForPeriod } from '@/actions/fuelPrice'
 import { calcCommute } from '@/lib/settlement'
 import { VEHICLE_FUEL_TYPE_LABELS, FUEL_EFFICIENCY, type VehicleFuelType } from '@/lib/constants'
 
@@ -27,6 +27,9 @@ interface Props {
   isOwnRow: boolean
   defaultHomeAddress?: string | null
   defaultFuelType?: string | null
+  /** 근무기간 — 유가 기준일을 비워두면 이 기간의 오피넷 평균가를 적용한다 (A안) */
+  periodStart?: string | null
+  periodEnd?: string | null
   onApply: (params: CommuteApplyParams) => void
 }
 
@@ -34,7 +37,7 @@ function formatKRW(n: number) {
   return n.toLocaleString('ko-KR') + '원'
 }
 
-export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAddress, defaultFuelType, onApply }: Props) {
+export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAddress, defaultFuelType, periodStart, periodEnd, onApply }: Props) {
   const router = useRouter()
   const [homeAddress, setHomeAddress] = useState(defaultHomeAddress ?? '')
   // 현장주소 — 현장 등록 정보(sites.address)가 기본값이고, 여기서 고쳐 저장하면 다음부터 자동 입력
@@ -46,6 +49,8 @@ export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAdd
   const [fuelType, setFuelType] = useState<VehicleFuelType>((defaultFuelType as VehicleFuelType) ?? 'gasoline')
   const [fuelPrice, setFuelPrice] = useState('')
   const [fuelPriceDate, setFuelPriceDate] = useState('')
+  // 유가 산정 근거 안내 — 기간 평균으로 채웠을 때 표본을 보여준다
+  const [fuelBasis, setFuelBasis] = useState('')
   const [distanceOneway, setDistanceOneway] = useState('') // 편도 km — 수동입력 or 경로조회로 채움
   const [toll, setToll] = useState('') // 왕복 통행료
   const [error, setError] = useState('')
@@ -84,11 +89,24 @@ export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAdd
     })
   }
 
-  // 오피넷 전국 일별 평균 유가 자동조회 — 기준일 미선택 시 오늘 유가
+  // 오피넷 유가 자동조회 — 기준일을 고르면 해당일, 비워두면 근무기간 평균가(A안).
+  // 기간 평균은 특정일 유가의 치우침(유리/불리)을 없애 발주청 시비를 줄인다.
   function handleAutoFuelPrice() {
     setError('')
-    const targetDate = fuelPriceDate || new Date().toISOString().slice(0, 10)
+    setFuelBasis('')
     startTransition(async () => {
+      if (!fuelPriceDate && periodStart && periodEnd) {
+        const res = await getFuelPriceAverageForPeriod(periodStart, periodEnd, fuelType)
+        if ('error' in res) {
+          setError(res.error)
+          return
+        }
+        setFuelPrice(res.data.price.toLocaleString('ko-KR'))
+        setFuelPriceDate('') // 기준일 없음 = 기간 평균 적용 (정산서에도 '기간 평균'으로 표기)
+        setFuelBasis(`근무기간(${periodStart}~${periodEnd}) 오피넷 전국 평균 — 고시일 ${res.data.sampleDays}일 표본 (${res.data.from}~${res.data.to})`)
+        return
+      }
+      const targetDate = fuelPriceDate || new Date().toISOString().slice(0, 10)
       const res = await getFuelPriceForDate(targetDate, fuelType)
       if ('error' in res) {
         setError(res.error)
@@ -209,15 +227,17 @@ export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAdd
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
             />
             <button type="button" onClick={handleAutoFuelPrice} disabled={isPending}
-              title="오피넷 전국 일별 평균 유가 자동조회 (기준일 미선택 시 오늘)"
+              title="오피넷 유가 자동조회 — 기준일을 고르면 해당일 고시가, 비워두면 근무기간 평균가"
               className="whitespace-nowrap rounded border border-green-300 bg-white px-2 py-1.5 text-xs text-green-700 hover:bg-green-50 disabled:opacity-50">
               {isPending ? '…' : '자동'}
             </button>
           </div>
         </div>
         <div>
-          <label className="mb-0.5 block text-xs text-gray-500">유가 기준일 (opinet.co.kr 고시)</label>
-          <input type="date" value={fuelPriceDate} onChange={(e) => setFuelPriceDate(e.target.value)}
+          <label className="mb-0.5 block text-xs text-gray-500">
+            유가 기준일 {periodStart && periodEnd ? '(비워두면 근무기간 평균 적용)' : '(opinet.co.kr 고시)'}
+          </label>
+          <input type="date" value={fuelPriceDate} onChange={(e) => { setFuelPriceDate(e.target.value); setFuelBasis('') }}
             className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none" />
         </div>
         <div>
@@ -249,6 +269,7 @@ export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAdd
       )}
 
       {error && <p className="text-xs text-red-600">{error}</p>}
+      {fuelBasis && <p className="text-xs text-green-700">✓ 유가 적용 근거: {fuelBasis}</p>}
 
       {preview && (
         <div className="rounded-lg border border-green-200 bg-white p-3 space-y-1">

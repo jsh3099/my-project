@@ -64,3 +64,75 @@ export async function getFuelPriceForDate(
     return { error: e instanceof Error ? e.message : '유가 조회 중 오류가 발생했습니다.' }
   }
 }
+
+export interface FuelPriceAverageResult {
+  price: number       // 기간 내 캐시된 일별 평균가의 평균 (원, 반올림)
+  sampleDays: number  // 표본 일수 (캐시된 고시일 수)
+  from: string        // 표본 최초일
+  to: string          // 표본 최종일
+}
+
+// 기성기간 평균 유가 — 유가 변동이 있는 여러 달 회차에서 특정일 유가의 치우침을 없앤다 (A안).
+// 무료 API는 최근 7일 중심이라, 조회할 때마다 캐시(fuel_prices)에 적재된 일별 고시가의
+// 기간 내 평균을 쓴다. 표본이 없으면 수기 입력을 안내한다.
+export async function getFuelPriceAverageForPeriod(
+  periodStart: string,
+  periodEnd: string,
+  fuelType: VehicleFuelType,
+): Promise<{ error: string } | { success: true; data: FuelPriceAverageResult }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd) || periodStart > periodEnd) {
+    return { error: '기간이 올바르지 않습니다.' }
+  }
+  const productCode = opinetProductCode(fuelType)
+  if (!productCode) return { error: '전기·수소 차량은 유가 자동조회를 지원하지 않습니다. 단가를 직접 입력하세요.' }
+
+  const admin = createAdminClient()
+
+  // 기간이 최근과 겹치면 오피넷에서 채울 수 있는 날짜를 먼저 캐시에 보강한다 (실패해도 캐시만으로 진행)
+  try {
+    const [recent, today] = await Promise.all([
+      fetchRecentDailyPrices(productCode),
+      fetchTodayPrice(productCode),
+    ])
+    const rows = [...recent, ...(today ? [today] : [])].filter((r) => r.date >= periodStart && r.date <= periodEnd)
+    if (rows.length > 0) {
+      await admin.from('fuel_prices').upsert(
+        rows.map((r) => ({ price_date: r.date, product_code: productCode, price: r.price })),
+        { onConflict: 'price_date,product_code' },
+      )
+    }
+  } catch {
+    // 캐시 보강 실패는 무시 — 기존 캐시로 평균을 시도한다
+  }
+
+  const { data: cached, error } = await admin
+    .from('fuel_prices')
+    .select('price_date, price')
+    .eq('product_code', productCode)
+    .gte('price_date', periodStart)
+    .lte('price_date', periodEnd)
+    .order('price_date')
+  if (error) return { error: `유가 조회 실패: ${error.message}` }
+
+  const rows = cached ?? []
+  if (rows.length === 0) {
+    return {
+      error: '기간 내 캐시된 오피넷 유가가 없습니다. opinet.co.kr에서 기간 평균 유가를 확인해 직접 입력하세요. (방문일·기준일 유가를 조회할 때마다 캐시가 쌓입니다)',
+    }
+  }
+
+  const avg = rows.reduce((s, r) => s + Number(r.price), 0) / rows.length
+  return {
+    success: true,
+    data: {
+      price: Math.round(avg),
+      sampleDays: rows.length,
+      from: rows[0].price_date,
+      to: rows[rows.length - 1].price_date,
+    },
+  }
+}

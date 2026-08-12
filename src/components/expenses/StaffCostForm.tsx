@@ -1211,6 +1211,8 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                   isOwnRow={sheet.id === myUserId}
                   defaultHomeAddress={sheet.id === myUserId ? myHomeAddress : undefined}
                   defaultFuelType={sheet.id === myUserId ? myFuelType : undefined}
+                  periodStart={sheetRow.periodStart}
+                  periodEnd={sheetRow.periodEnd}
                   onApply={(params: CommuteApplyParams) => {
                     patchRow(sheet.id, sheet.isExtra, {
                       commuteRoundtrip: params.costPerTrip.toLocaleString('ko-KR'),

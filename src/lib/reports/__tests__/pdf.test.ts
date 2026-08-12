@@ -136,6 +136,32 @@ describe('정산서 PDF (F-22)', () => {
     expect(flat).toContain('청구 대상에서 제외')
   })
 
+  it('교통비·출장비 산출서가 경로 데이터로 자동 생성된다', () => {
+    const dd = buildDocDefinition(data)
+    const flat = JSON.stringify(dd.content)
+    expect(flat).toContain('상주기술인 교통비 산출서')
+    expect(flat).toContain('기술지원기술인 출장비 산출서')
+    // 산출 근거: 왕복 거리 산식과 오피넷 각주
+    expect(flat).toContain('120.5km × 2(왕복) = 241km')
+    expect(flat).toContain('www.opinet.co.kr')
+    // 유가 기준일이 있으면 고시일, 없으면 기간 평균으로 표기
+    expect(flat).toContain('오피넷 2026.07.01 고시')
+  })
+
+  it('유가 기준일이 없으면 기간 평균으로 표기한다', () => {
+    const avgData = {
+      ...data,
+      expenses: data.expenses.map((e) =>
+        e.subcategory === 'commute' && e.commuteCalc
+          ? { ...e, commuteCalc: { ...e.commuteCalc, fuel_price_date: null } }
+          : e,
+      ),
+    } as SettlementReportData
+    const flat = JSON.stringify(buildDocDefinition(avgData).content)
+    expect(flat).toContain('기간 평균')
+    expect(flat).toContain('오피넷 평균')
+  })
+
   it('한글 폰트가 임베딩된 PDF 바이트를 생성한다', async () => {
     const buf = await buildSettlementPdfBuffer(data)
     expect(buf.subarray(0, 5).toString('latin1')).toBe('%PDF-')
