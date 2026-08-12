@@ -35,3 +35,64 @@ export function parseMaintItems(lines: string[]): ParsedMaintItem[] {
   }
   return items
 }
+
+// ── 현장경비 범용 영수증 인식 ────────────────────────────────────
+// 양식이 제각각이라(주문서·세금계산서·카드영수증 등) 확실한 것만 뽑는다:
+// 금액은 합계 키워드 줄 우선, 일자는 문서의 첫 날짜, 구매처는 상호 키워드 줄 → 파일명 순 추정.
+// 인식값은 제안일 뿐 — 사용자가 확인 후 저장한다.
+
+export type ParsedExpenseItem = { date: string; vendor: string; description: string; amountGross: number }
+
+const DATE_RE = /(\d{4})[-./년]\s?(\d{1,2})[-./월]\s?(\d{1,2})일?/
+// 합계 키워드 — 승인·결제 계열이 품목 합계보다 신뢰도가 높다
+const TOTAL_RE = /(?:합\s*계|총\s*액|총\s*금액|결제\s*금액|승인\s*금액|청구\s*금액|받을\s*금액)\D*([\d,]{4,})\s*원?/
+const VENDOR_RE = /(?:상\s*호|가맹점명?|판매자|공급자\s*상호|매\s*장)\s*[:：]?\s*(\S[^\d]{0,30}?)\s*(?:대표|사업자|$)/
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+function normalizeDate(m: RegExpMatchArray): string {
+  return `${m[1]}-${pad2(parseInt(m[2], 10))}-${pad2(parseInt(m[3], 10))}`
+}
+
+// 파일명에서 구매처 추정 — "영수증_쿠팡_2026-05.pdf" 류의 관례적 이름에서 날짜·확장자·일반어를 걷어낸다
+export function vendorFromFileName(fileName: string): string {
+  const base = fileName.replace(/\.[a-zA-Z0-9]+$/, '')
+  const tokens = base
+    .split(/[_\-\s()[\]]+/)
+    .filter((t) => t.length >= 2)
+    .filter((t) => !/^\d{2,4}([-.년]?\d{1,2}){0,2}[일월]?$/.test(t))
+    .filter((t) => !/^(영수증|세금계산서|계산서|거래명세서|납입확인증|확인증|스캔|사본|테스트|receipt|invoice|scan)$/i.test(t))
+  return tokens[0] ?? ''
+}
+
+export function parseExpenseItems(lines: string[], fileName = ''): ParsedExpenseItem[] {
+  let vendor = ''
+  let firstDate = ''
+  let totalAmount = 0
+  let maxAmount = 0
+
+  for (const line of lines) {
+    if (!vendor) {
+      const v = line.match(VENDOR_RE)
+      if (v && v[1].trim().length >= 2) vendor = v[1].trim()
+    }
+    if (!firstDate) {
+      const d = line.match(DATE_RE)
+      if (d) firstDate = normalizeDate(d)
+    }
+    if (!totalAmount) {
+      const t = line.match(TOTAL_RE)
+      if (t) totalAmount = num(t[1])
+    }
+    // 합계 키워드가 없는 문서 대비 — 가장 큰 금액을 후보로 남긴다
+    for (const m of line.matchAll(/([\d]{1,3}(?:,\d{3})+)\s*원?/g)) {
+      const v = num(m[1])
+      if (v > maxAmount) maxAmount = v
+    }
+  }
+
+  const amount = totalAmount || maxAmount
+  if (amount <= 0) return []
+  if (!vendor) vendor = vendorFromFileName(fileName)
+  return [{ date: firstDate, vendor, description: '', amountGross: amount }]
+}

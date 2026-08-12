@@ -1,0 +1,598 @@
+<title>현장경비 입력 개편 목업</title>
+<style>
+  :root {
+    --bg: #F6F7F9; --surface: #FFFFFF; --surface-2: #EEF1F5;
+    --ink: #1B2330; --ink-2: #5A6577; --ink-3: #98A2B3; --line: #E2E6EC;
+    --primary: #2563EB; --primary-soft: #EAF0FE;
+    --exp: #4F46E5; --exp-soft: #ECEBFC;
+    --ok: #15803D; --ok-soft: #E7F5EC;
+    --warn: #B45309; --warn-soft: #FCF1E3;
+    --bad: #B91C1C; --bad-soft: #FBEAEA;
+    --shadow: 0 1px 2px rgba(20,28,45,.06), 0 4px 16px rgba(20,28,45,.07);
+    --sheet-shadow: -8px 0 32px rgba(20,28,45,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #13161C; --surface: #1B2029; --surface-2: #232935;
+      --ink: #E6EAF1; --ink-2: #9AA5B8; --ink-3: #66718A; --line: #2C3442;
+      --primary: #5B8DF6; --primary-soft: #1D2A45;
+      --exp: #8B93F8; --exp-soft: #232349;
+      --ok: #4ADE80; --ok-soft: #16301F;
+      --warn: #F0A860; --warn-soft: #38271135;
+      --bad: #F87171; --bad-soft: #3A1D1D;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+      --sheet-shadow: -8px 0 32px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #13161C; --surface: #1B2029; --surface-2: #232935;
+    --ink: #E6EAF1; --ink-2: #9AA5B8; --ink-3: #66718A; --line: #2C3442;
+    --primary: #5B8DF6; --primary-soft: #1D2A45;
+    --exp: #8B93F8; --exp-soft: #232349;
+    --ok: #4ADE80; --ok-soft: #16301F;
+    --warn: #F0A860; --warn-soft: #38271135;
+    --bad: #F87171; --bad-soft: #3A1D1D;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+    --sheet-shadow: -8px 0 32px rgba(0,0,0,.5);
+  }
+  :root[data-theme="light"] {
+    --bg: #F6F7F9; --surface: #FFFFFF; --surface-2: #EEF1F5;
+    --ink: #1B2330; --ink-2: #5A6577; --ink-3: #98A2B3; --line: #E2E6EC;
+    --primary: #2563EB; --primary-soft: #EAF0FE;
+    --exp: #4F46E5; --exp-soft: #ECEBFC;
+    --ok: #15803D; --ok-soft: #E7F5EC;
+    --warn: #B45309; --warn-soft: #FCF1E3;
+    --bad: #B91C1C; --bad-soft: #FBEAEA;
+    --shadow: 0 1px 2px rgba(20,28,45,.06), 0 4px 16px rgba(20,28,45,.07);
+    --sheet-shadow: -8px 0 32px rgba(20,28,45,.18);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", sans-serif;
+    font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  .page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+  .page-head h1 { font-size: 21px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .page-head .sub { color: var(--ink-2); font-size: 13px; margin: 2px 0 0; }
+  .mock-note { font-size: 12px; color: var(--ink-3); background: var(--surface-2); border: 1px dashed var(--line); border-radius: 6px; padding: 4px 10px; }
+
+  .context-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 18px; box-shadow: var(--shadow);
+  }
+  .context-bar .field { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+  .context-bar .field .lb { color: var(--ink-3); font-size: 12px; }
+  .fake-select {
+    border: 1px solid var(--line); background: var(--surface); border-radius: 7px;
+    padding: 5px 26px 5px 10px; font-size: 13px; position: relative; color: var(--ink);
+  }
+  .fake-select::after { content: "▾"; position: absolute; right: 9px; color: var(--ink-3); font-size: 11px; }
+  .context-bar .spacer { flex: 1; }
+  .total-pill { background: var(--primary-soft); color: var(--primary); font-weight: 700; border-radius: 999px; padding: 5px 14px; font-size: 13.5px; }
+
+  .chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 2px 9px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .chip.spec { background: var(--surface-2); color: var(--ink-2); }
+  .chip.exp { background: var(--exp-soft); color: var(--exp); }
+  .chip.ok { background: var(--ok-soft); color: var(--ok); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.bad { background: var(--bad-soft); color: var(--bad); }
+  .chip.auto { background: var(--primary-soft); color: var(--primary); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* ── 항목 카드: 카드 1장 = 세부항목 1개 ── */
+  .item-card {
+    background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--exp);
+    border-radius: 12px; box-shadow: var(--shadow); margin-bottom: 14px; overflow: hidden;
+  }
+  .card-head {
+    display: flex; align-items: center; gap: 12px; padding: 14px 18px;
+    width: 100%; background: none; border: none; text-align: left; color: inherit;
+  }
+  .card-head:hover { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
+  .card-head .name { font-size: 15.5px; font-weight: 700; }
+  .card-head .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .card-head .grow { flex: 1; }
+  .card-head .subtotal { text-align: right; }
+  .card-head .subtotal .amt { font-size: 16px; font-weight: 700; }
+  .card-head .subtotal .cap { font-size: 11px; color: var(--ink-3); }
+  .card-head .subtotal .cap.over { color: var(--bad); font-weight: 600; }
+  .chev { color: var(--ink-3); transition: transform .18s ease; font-size: 12px; }
+  .item-card.open .chev { transform: rotate(180deg); }
+  @media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
+  .card-body { display: none; border-top: 1px solid var(--line); }
+  .item-card.open .card-body { display: block; }
+
+  /* 항목 조건 바 — VAT 토글·한도 기준 등 항목당 한 번만 */
+  .item-config {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px;
+    background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+    padding: 10px 18px; font-size: 12.5px; color: var(--ink-2);
+    border-bottom: 1px solid var(--line);
+  }
+  .item-config .fld { display: flex; align-items: center; gap: 7px; }
+  .item-config .lb { color: var(--ink-3); font-size: 11.5px; }
+  .item-config label.tgl { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--ink-2); }
+  .item-config a { color: var(--primary); font-weight: 600; text-decoration: none; font-size: 12px; }
+  .item-config a:hover { text-decoration: underline; }
+  .item-config .strong { font-weight: 700; color: var(--ink); }
+
+  /* 건별 내역 목록 — 월별 그룹 */
+  .entry-list { padding: 6px 0 2px; }
+  .month-label {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 8px 18px 4px; font-size: 11.5px; font-weight: 700; color: var(--ink-3); letter-spacing: .03em;
+  }
+  .entry-head, .entry-row {
+    display: grid; grid-template-columns: 96px 1fr 1.5fr 108px 108px 84px 30px;
+    align-items: center; gap: 8px; padding: 7px 18px;
+  }
+  .entry-head { padding: 6px 18px 2px; font-size: 10.5px; color: var(--ink-3); font-weight: 600; }
+  .entry-head .r { text-align: right; }
+  .entry-row {
+    border-top: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+    font-size: 13px;
+  }
+  .entry-row:hover { background: color-mix(in srgb, var(--surface-2) 40%, transparent); }
+  .entry-row .date { font-weight: 600; }
+  .entry-row input[type="text"] {
+    width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+    font-size: 12.5px; background: var(--surface); color: var(--ink);
+  }
+  .entry-row .cell { text-align: right; }
+  .entry-row .cell .v { font-weight: 600; }
+  .entry-row .cell .u { display: block; font-size: 10.5px; color: var(--ink-3); }
+  .entry-row .st { text-align: center; }
+  .entry-row .x { border: none; background: none; color: var(--ink-3); font-size: 13px; border-radius: 5px; padding: 3px; }
+  .entry-row .x:hover { color: #D14; background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+  /* 복리후생비: 구분 열 추가 */
+  .welfare .entry-head, .welfare .entry-row { grid-template-columns: 96px 1fr 1.3fr 70px 108px 108px 84px 30px; }
+  .tag-select {
+    border: 1px solid var(--line); background: var(--surface); border-radius: 6px;
+    padding: 3px 6px; font-size: 12px; color: var(--ink-2);
+  }
+  .month-sum { margin-left: auto; font-weight: 600; color: var(--ink-2); font-size: 11.5px; }
+  .month-sum b { color: var(--ink); }
+
+  .card-foot {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 35%, var(--surface));
+    padding: 10px 18px;
+  }
+  .add-entry {
+    border: 1px dashed var(--line); background: none; color: var(--ink-2);
+    border-radius: 7px; padding: 4px 12px; font-size: 12.5px; font-weight: 600;
+  }
+  .add-entry:hover { border-color: var(--primary); color: var(--primary); }
+  .file-chip {
+    display: inline-flex; align-items: center; gap: 6px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 7px; padding: 3px 8px; font-size: 12px;
+  }
+  .file-chip .cat { width: 8px; height: 8px; border-radius: 2px; background: var(--exp); }
+  .file-chip .x { color: var(--ink-3); border: none; background: none; padding: 0 1px; font-size: 12px; }
+  .foot-lb { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+  .save-item {
+    margin-left: auto; border: 1px solid var(--primary); color: var(--primary); background: none;
+    border-radius: 7px; padding: 4px 14px; font-size: 12.5px; font-weight: 600;
+  }
+  .save-item:hover { background: var(--primary-soft); }
+
+  /* 한도 경고 배너 (복리후생) */
+  .limit-banner {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+    background: var(--warn-soft); color: var(--warn);
+    padding: 9px 18px; font-size: 12.5px; border-bottom: 1px solid var(--line);
+  }
+  .limit-banner b { font-weight: 700; }
+
+  /* ── + 항목 추가 (기존 4단계 위저드 대체) ── */
+  .picker-card {
+    background: var(--surface); border: 1px dashed var(--line); border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 14px;
+  }
+  .picker-card h2 { margin: 0 0 10px; font-size: 14px; color: var(--ink-2); }
+  .picker-cats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .picker-cats .chip { cursor: pointer; border: 1px solid transparent; }
+  .picker-cats .chip.on { border-color: var(--exp); }
+  .picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+  .picker-grid button {
+    border: 1px solid var(--line); background: var(--surface); border-radius: 9px;
+    padding: 9px 12px; text-align: left; color: var(--ink);
+  }
+  .picker-grid button:hover { border-color: var(--exp); background: var(--exp-soft); }
+  .picker-grid .t { font-size: 13px; font-weight: 600; display: block; }
+  .picker-grid .b { font-size: 11px; color: var(--ink-3); display: block; margin-top: 2px; }
+  .picker-grid .b.low { color: var(--bad); }
+
+  .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+  .btn { border-radius: 9px; padding: 10px 22px; font-size: 14px; font-weight: 600; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.06); }
+
+  /* ── 우측 시트: 항목 상세 ── */
+  .sheet-backdrop { position: fixed; inset: 0; background: rgba(9,13,20,.42); opacity: 0; pointer-events: none; transition: opacity .18s ease; z-index: 40; }
+  .sheet {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(430px, 92vw);
+    background: var(--surface); box-shadow: var(--sheet-shadow); z-index: 41;
+    transform: translateX(103%); transition: transform .22s ease; display: flex; flex-direction: column;
+  }
+  body.sheet-open .sheet-backdrop { opacity: 1; pointer-events: auto; }
+  body.sheet-open .sheet { transform: none; }
+  @media (prefers-reduced-motion: reduce) { .sheet, .sheet-backdrop { transition: none; } }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px 12px; border-bottom: 1px solid var(--line); }
+  .sheet-head h2 { font-size: 15.5px; margin: 0; }
+  .sheet-head .who { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+  .sheet-close { border: none; background: var(--surface-2); border-radius: 7px; width: 30px; height: 30px; color: var(--ink-2); font-size: 14px; }
+  .sheet-body { flex: 1; overflow-y: auto; padding: 16px 20px; display: grid; gap: 14px; align-content: start; }
+  .calc-block { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .calc-block h3 { margin: 0 0 8px; font-size: 12.5px; color: var(--ink-2); display: flex; align-items: center; justify-content: space-between; }
+  .calc-line { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+  .calc-line .k { color: var(--ink-2); }
+  .calc-line .v { font-weight: 600; }
+  .calc-line .v.bad { color: var(--bad); }
+  .calc-formula { margin-top: 8px; background: var(--surface-2); border-radius: 7px; padding: 8px 10px; font-size: 12px; color: var(--ink-2); }
+  .calc-formula b { color: var(--exp); font-size: 13px; }
+  .doc-list { margin: 0; padding-left: 16px; font-size: 12.5px; color: var(--ink-2); display: grid; gap: 3px; }
+  .sheet-foot { padding: 14px 20px; border-top: 1px solid var(--line); display: flex; gap: 10px; }
+  .sheet-foot .btn { flex: 1; text-align: center; }
+
+  /* 구현 노트 */
+  .notes { margin-top: 34px; }
+  .notes h2 { font-size: 16px; margin: 0 0 12px; }
+  .note-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  .note-card h3 { margin: 0 0 8px; font-size: 14.5px; }
+  .note-card ul { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; display: grid; gap: 5px; }
+  .note-card li b { color: var(--ink); font-weight: 600; }
+
+  @media (max-width: 760px) {
+    .entry-head { display: none; }
+    .entry-row, .welfare .entry-row { grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+    .entry-row .st { text-align: left; }
+  }
+</style>
+
+<div class="wrap">
+  <div class="page-head">
+    <div>
+      <h1>현장경비 입력 — 개편 목업</h1>
+      <p class="sub">정산서 1-4~ / 3-1 세부 사용내역 · 주재비·출장비 카드와 같은 패턴 (카드 1장 = 세부항목 1개, 우측 시트)</p>
+    </div>
+    <span class="mock-note">클릭 가능한 목업 — 저장되지 않습니다</span>
+  </div>
+
+  <div class="context-bar">
+    <div class="field"><span class="lb">현장</span><span class="fake-select">도매시장 5회차</span></div>
+    <div class="field"><span class="lb">기성회차</span><span class="fake-select">5회차 (진행 중 · 2026-04-01 ~ 08-31)</span></div>
+    <div class="spacer"></div>
+    <span class="total-pill num">이번 회차 현장경비 1,872,700원</span>
+  </div>
+
+  <!-- 사무용품비 (열림) -->
+  <article class="item-card open">
+    <button class="card-head" data-toggle aria-expanded="true">
+      <span class="name">사무용품비</span>
+      <span class="meta">
+        <span class="chip exp">현장운영경비</span>
+        <span class="chip spec">7건</span>
+        <span class="chip ok"><span class="dot"></span>저장됨</span>
+        <span class="chip warn"><span class="dot"></span>확인 필요 2건</span>
+      </span>
+      <span class="grow"></span>
+      <span class="subtotal">
+        <div class="amt num">417,270원</div>
+        <div class="cap num">계상 잔액 1,770,100원</div>
+      </span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="card-body">
+      <div class="item-config">
+        <label class="tgl"><input type="checkbox" checked> 적용금액 VAT 제외 (÷1.1)</label>
+        <div class="fld"><span class="lb">필수 증빙</span><span>용품구입 영수증 · 세금계산서</span></div>
+        <a href="#" data-open-sheet>📎 항목 상세 (계상 잔액·증빙 기준)</a>
+      </div>
+
+      <div class="entry-list num">
+        <div class="entry-head">
+          <span>사용일자</span><span>구매처</span><span>내용</span><span class="r">금액</span><span class="r">적용금액</span><span></span><span></span>
+        </div>
+
+        <div class="month-label">2026-04 <span class="month-sum">월 소계 <b>128,700원</b></span></div>
+        <div class="entry-row">
+          <span class="date">04-03 (금)</span>
+          <span><input type="text" value="쿠팡" readonly></span>
+          <span><input type="text" value="사무용품 (종이컵·A4용지)" readonly></span>
+          <span class="cell"><span class="v">88,000</span></span>
+          <span class="cell"><span class="v">80,000</span><span class="u">VAT 제외</span></span>
+          <span class="st"><span class="chip ok">저장됨</span></span>
+          <button class="x" aria-label="내역 삭제">✕</button>
+        </div>
+        <div class="entry-row">
+          <span class="date">04-21 (화)</span>
+          <span><input type="text" value="오피스디포" readonly></span>
+          <span><input type="text" value="파일·바인더" readonly></span>
+          <span class="cell"><span class="v">53,570</span></span>
+          <span class="cell"><span class="v">48,700</span><span class="u">VAT 제외</span></span>
+          <span class="st"><span class="chip ok">저장됨</span></span>
+          <button class="x" aria-label="내역 삭제">✕</button>
+        </div>
+
+        <div class="month-label">2026-05 <span class="month-sum">월 소계 <b>96,400원</b></span></div>
+        <div class="entry-row">
+          <span class="date">05-11 (월)</span>
+          <span><input type="text" value="문구몰"></span>
+          <span><input type="text" value="프린터 토너"></span>
+          <span class="cell"><span class="v">106,040</span></span>
+          <span class="cell"><span class="v">96,400</span><span class="u">VAT 제외</span></span>
+          <span class="st"><span class="chip warn">확인 필요</span></span>
+          <button class="x" aria-label="내역 삭제">✕</button>
+        </div>
+
+        <div class="month-label">2026-06 ~ 2026-08 · 4건 <span style="font-weight:400">(생략 — 실화면은 전체 표시)</span></div>
+      </div>
+
+      <div class="card-foot">
+        <button class="add-entry">+ 내역 추가</button>
+        <span class="foot-lb">증빙 3</span>
+        <span class="file-chip"><span class="cat"></span>영수증_사무용품_2026-04.pdf <button class="x" aria-label="첨부 제거">✕</button></span>
+        <span class="file-chip"><span class="cat"></span>세금계산서_토너.pdf <button class="x" aria-label="첨부 제거">✕</button></span>
+        <button class="add-entry">+ 영수증 추가 (금액 자동 인식)</button>
+        <button class="save-item">사무용품비 저장</button>
+      </div>
+    </div>
+  </article>
+
+  <!-- 복리후생비 (열림, 한도 초과 시나리오) -->
+  <article class="item-card open welfare">
+    <button class="card-head" data-toggle aria-expanded="true">
+      <span class="name">복리후생비</span>
+      <span class="meta">
+        <span class="chip exp">현장운영경비</span>
+        <span class="chip spec">10건</span>
+        <span class="chip bad"><span class="dot"></span>한도 초과 100,000원</span>
+      </span>
+      <span class="grow"></span>
+      <span class="subtotal">
+        <div class="amt num">500,000원</div>
+        <div class="cap over num">증빙 600,000원 중 100,000원 불인정</div>
+      </span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="card-body">
+      <div class="item-config">
+        <div class="fld"><span class="lb">월별 정산기준</span><span>상주 <span class="strong">2명</span> × 월한도 <span class="strong num">50,000원</span> = 산출 <span class="strong num">100,000원/월</span></span></div>
+        <label class="tgl"><input type="checkbox" checked> 적용금액 VAT 제외 (÷1.1)</label>
+        <a href="#" data-open-sheet>🧮 인정금액 산출 근거</a>
+      </div>
+
+      <div class="limit-banner num">
+        매월 증빙 120,000원 &gt; 산출 100,000원 — 월 20,000원 × 5개월 = <b>100,000원 불인정</b> (초과분은 발주청 미청구)
+      </div>
+
+      <div class="entry-list num">
+        <div class="entry-head">
+          <span>사용일자</span><span>구매처</span><span>내용</span><span>구분</span><span class="r">금액</span><span class="r">적용금액</span><span></span><span></span>
+        </div>
+
+        <div class="month-label">2026-04 <span class="month-sum">증빙 <b>120,000</b> → 인정 <b>100,000원</b> · 초과 20,000</span></div>
+        <div class="entry-row">
+          <span class="date">04-08 (수)</span>
+          <span><input type="text" value="이마트 청주점" readonly></span>
+          <span><input type="text" value="음료·간식" readonly></span>
+          <span><select class="tag-select"><option selected>음료</option><option>식대</option><option>기타</option></select></span>
+          <span class="cell"><span class="v">66,000</span></span>
+          <span class="cell"><span class="v">60,000</span></span>
+          <span class="st"><span class="chip ok">저장됨</span></span>
+          <button class="x" aria-label="내역 삭제">✕</button>
+        </div>
+        <div class="entry-row">
+          <span class="date">04-24 (금)</span>
+          <span><input type="text" value="현장식당" readonly></span>
+          <span><input type="text" value="회의 중식" readonly></span>
+          <span><select class="tag-select"><option>음료</option><option selected>식대</option><option>기타</option></select></span>
+          <span class="cell"><span class="v">66,000</span></span>
+          <span class="cell"><span class="v">60,000</span></span>
+          <span class="st"><span class="chip ok">저장됨</span></span>
+          <button class="x" aria-label="내역 삭제">✕</button>
+        </div>
+
+        <div class="month-label">2026-05 ~ 2026-08 · 8건 <span style="font-weight:400">(생략 — 월별 동일 패턴)</span></div>
+      </div>
+
+      <div class="card-foot">
+        <button class="add-entry">+ 내역 추가</button>
+        <span class="foot-lb">증빙 5</span>
+        <span class="file-chip"><span class="cat"></span>복리후생_확인증_2026-04.pdf <button class="x" aria-label="첨부 제거">✕</button></span>
+        <button class="add-entry">+ 영수증 추가 (금액 자동 인식)</button>
+        <button class="save-item">복리후생비 저장</button>
+      </div>
+    </div>
+  </article>
+
+  <!-- 통신비 (접힘) -->
+  <article class="item-card">
+    <button class="card-head" data-toggle aria-expanded="false">
+      <span class="name">통신비</span>
+      <span class="meta">
+        <span class="chip exp">현장운영경비</span>
+        <span class="chip spec">5건</span>
+        <span class="chip ok"><span class="dot"></span>저장됨</span>
+        <span class="chip warn">⚠ 개인 휴대폰 불인정 — 저장 시 확인 체크</span>
+      </span>
+      <span class="grow"></span>
+      <span class="subtotal">
+        <div class="amt num">275,000원</div>
+        <div class="cap">월 55,000 × 5개월</div>
+      </span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="card-body">
+      <div class="item-config"><span class="lb">접힌 카드 — 펼치면 사무용품비와 동일한 월별 내역 목록</span></div>
+    </div>
+  </article>
+
+  <!-- 차량운행비 > 유류비 (접힘) — 다른 비목도 같은 목록에 -->
+  <article class="item-card">
+    <button class="card-head" data-toggle aria-expanded="false">
+      <span class="name">유류비</span>
+      <span class="meta">
+        <span class="chip spec" style="background: var(--primary-soft); color: var(--primary);">차량운행비</span>
+        <span class="chip spec">12건</span>
+        <span class="chip warn"><span class="dot"></span>확인 필요 3건</span>
+      </span>
+      <span class="grow"></span>
+      <span class="subtotal">
+        <div class="amt num">565,430원</div>
+        <div class="cap num">계상 잔액 210,000원</div>
+      </span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="card-body">
+      <div class="item-config"><span class="lb">접힌 카드 — 주유·통행료·주차료 영수증 내역, 동일 패턴</span></div>
+    </div>
+  </article>
+
+  <!-- 인쇄·제본 (접힘, 미입력) -->
+  <article class="item-card">
+    <button class="card-head" data-toggle aria-expanded="false">
+      <span class="name">인쇄·제본</span>
+      <span class="meta">
+        <span class="chip spec" style="background: var(--ok-soft); color: var(--ok);">도서인쇄비</span>
+        <span class="chip spec" style="opacity:.7"><span class="dot"></span>미입력</span>
+      </span>
+      <span class="grow"></span>
+      <span class="subtotal">
+        <div class="amt num" style="color: var(--ink-3)">0원</div>
+        <div class="cap num">계상 잔액 437,370원</div>
+      </span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="card-body">
+      <div class="item-config"><span class="lb">접힌 카드 — 내역이 없으면 「+ 내역 추가」만 표시</span></div>
+    </div>
+  </article>
+
+  <!-- + 항목 추가: 기존 4단계 위저드 대체 -->
+  <section class="picker-card">
+    <h2>+ 항목 추가 — 비목을 고르면 위 목록에 카드가 생깁니다 (기존 4단계 입력 대체)</h2>
+    <div class="picker-cats">
+      <span class="chip exp on">현장운영경비</span>
+      <span class="chip spec">차량운행비</span>
+      <span class="chip spec">출장비 (수기)</span>
+      <span class="chip spec">현지사무원비</span>
+      <span class="chip spec">도서인쇄비</span>
+    </div>
+    <div class="picker-grid num">
+      <button><span class="t">안전용품비</span><span class="b">계상 잔액 512,000원</span></button>
+      <button><span class="t">사무기기비</span><span class="b">계상 잔액 890,000원</span></button>
+      <button><span class="t">사무실비</span><span class="b">계상 잔액 1,200,000원</span></button>
+      <button><span class="t">복리후생비</span><span class="b low">이미 추가됨</span></button>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button class="btn">취소</button>
+    <button class="btn primary">전체 임시저장</button>
+  </div>
+
+  <!-- 구현 노트 -->
+  <section class="notes">
+    <h2>구현 노트</h2>
+    <div class="note-card">
+      <h3>주재비·출장비 카드에서 그대로 가져오는 것</h3>
+      <ul>
+        <li><b>카드 = 정산 단위</b> — 주재비는 사람, 출장비도 사람, 현장경비는 <b>세부항목</b>(정산서 3-1 세부 사용내역의 표 1개 = 카드 1장)</li>
+        <li><b>상태 칩</b> — <span class="chip ok" style="font-size:10.5px">저장됨</span> 서버 일치 / <span class="chip warn" style="font-size:10.5px">확인 필요</span> 입력·인식 후 미저장 / <span class="chip bad" style="font-size:10.5px">한도 초과</span> 불인정 발생 / 미입력</li>
+        <li><b>우측 시트</b> — 계상 잔액·필수 증빙·복리후생 인정금액 산출 근거를 시트로 (표 안 패널 금지)</li>
+        <li><b>증빙 스트립 + 증분 저장</b> — 첨부 즉시 업로드, 항목 단위 「○○ 저장」 버튼 (주재비 saveStaffCostItem 패턴)</li>
+        <li><b>영수증 금액 자동 인식</b> — parseReceipt 확장: 첨부 시 금액·일자 추출해 내역 행 제안</li>
+      </ul>
+    </div>
+    <div class="note-card">
+      <h3>현장경비에서만 다른 것 (기존 4단계 위저드 → 카드 목록)</h3>
+      <ul>
+        <li><b>회차 전체가 한 화면</b> — 기존엔 1건 입력하고 목록으로 이동하는 왕복 구조. 개편안은 회차의 모든 항목·내역이 카드 목록으로 보이고, 그 자리에서 추가·수정</li>
+        <li><b>월별 그룹 행</b> — 저장 단위는 기존과 동일한 <b>월 × 세부항목 1건(expense) + items[]</b> — createExpense·calcItemized·calcWelfare 서버 재계산 로직 그대로</li>
+        <li><b>복리후생 한도가 카드에 상시 노출</b> — 월별 증빙 vs 산출(인원×한도) 비교와 불인정액을 배너로. 기존엔 저장 직전에야 경고</li>
+        <li><b>계상 잔액이 카드 요약에</b> — 비목 선택 버튼에만 있던 잔액을 카드 우측 캡션으로 (잔액 초과는 빨강)</li>
+        <li>통신비 「개인 휴대폰 아님」 확인 체크는 저장 버튼 옆으로 유지</li>
+      </ul>
+    </div>
+    <div class="note-card">
+      <h3>그다음 (순차 진행)</h3>
+      <ul>
+        <li><b>출근부 목업</b> — 첨부→자동인식→확인 3단계 스텝 + 인원 행 상태 칩 (별도 파일: attendance-redesign-mockup.html)</li>
+        <li>본사담당자용(검토·정산 확정)은 현장직원용 완성 후</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<!-- 우측 시트: 항목 상세 -->
+<div class="sheet-backdrop" data-close-sheet></div>
+<aside class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+  <div class="sheet-head">
+    <div>
+      <h2 id="sheet-title">복리후생비 — 인정금액 산출 근거</h2>
+      <div class="who">도매시장 5회차 · 5회차 (2026-04 ~ 08)</div>
+    </div>
+    <button class="sheet-close" data-close-sheet aria-label="닫기">✕</button>
+  </div>
+  <div class="sheet-body num">
+    <div class="calc-block">
+      <h3>월별 정산기준 <span class="chip exp">공무원 여비규정</span></h3>
+      <div class="calc-line"><span class="k">상주인원</span><span class="v">2명</span></div>
+      <div class="calc-line"><span class="k">1인 월한도</span><span class="v">50,000원</span></div>
+      <div class="calc-line"><span class="k">월 산출금액</span><span class="v">100,000원</span></div>
+      <div class="calc-formula">
+        인정금액 = min(산출 100,000, 증빙 120,000) = <b>100,000원/월</b>
+      </div>
+    </div>
+    <div class="calc-block">
+      <h3>회차 합계 (5개월)</h3>
+      <div class="calc-line"><span class="k">증빙금액 (VAT 제외 합)</span><span class="v">600,000원</span></div>
+      <div class="calc-line"><span class="k">인정금액</span><span class="v">500,000원</span></div>
+      <div class="calc-line"><span class="k">불인정 (한도 초과)</span><span class="v bad">−100,000원</span></div>
+    </div>
+    <div class="calc-block">
+      <h3>계상 대비</h3>
+      <div class="calc-line"><span class="k">현장주재비 항목 잔액</span><span class="v">1,770,100원</span></div>
+      <div class="calc-line"><span class="k">직접경비 총액 잔액</span><span class="v">5,513,304원</span></div>
+    </div>
+    <div class="calc-block">
+      <h3>필수 증빙</h3>
+      <ul class="doc-list">
+        <li>비용 산출내역서 및 확인증</li>
+        <li>음료·간식·회의비·회식 등 — 1인 1월 한도 적용</li>
+      </ul>
+    </div>
+  </div>
+  <div class="sheet-foot">
+    <button class="btn" data-close-sheet>닫기</button>
+    <button class="btn primary">복리후생비 저장</button>
+  </div>
+</aside>
+
+<script>
+  document.querySelectorAll('[data-toggle]').forEach(head => {
+    head.addEventListener('click', () => {
+      const card = head.closest('.item-card')
+      const open = card.classList.toggle('open')
+      head.setAttribute('aria-expanded', open)
+    })
+  })
+  document.querySelectorAll('[data-open-sheet]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); document.body.classList.add('sheet-open') })
+  })
+  document.querySelectorAll('[data-close-sheet]').forEach(el => {
+    el.addEventListener('click', () => document.body.classList.remove('sheet-open'))
+  })
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') document.body.classList.remove('sheet-open') })
+</script>

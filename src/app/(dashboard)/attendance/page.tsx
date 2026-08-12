@@ -175,6 +175,46 @@ export default async function AttendancePage({
         )}
       </div>
 
+      {selectedRound && (() => {
+        // 스텝 스트립 상태 — ① 첨부 ② 자동 인식 확인 ③ 저장
+        const attachedCount = ['resident', 'support'].filter((t) => sheetUrlsOf(t as StaffType).length > 0).length
+        const hasRecords = records.some((r) => r.work_days > 0 || (r.visit_dates?.length ?? 0) > 0)
+        const steps: { title: string; detail: string; state: 'done' | 'active' | 'todo' }[] = [
+          {
+            title: '① 출근부 첨부',
+            detail: '현장 작성·서명본 스캔 — 상주 1부 · 기술지원 1부',
+            state: attachedCount === 2 ? 'done' : 'active',
+          },
+          {
+            title: '② 자동 인식 확인',
+            detail: 'PDF에서 읽은 일수·방문일을 확인·수정',
+            state: attachedCount === 0 ? 'todo' : hasRecords ? 'done' : 'active',
+          },
+          {
+            title: '③ 저장',
+            detail: '주재비(식대·교통비)·출장비 폼에 자동 반영',
+            state: hasRecords ? 'done' : 'todo',
+          },
+        ]
+        return (
+          <div className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm sm:flex-row">
+            {steps.map((s, i) => (
+              <div key={s.title} className={`flex flex-1 items-center gap-2.5 px-4 py-3 ${i > 0 ? 'border-t border-gray-100 sm:border-t-0 sm:border-l' : ''}`}>
+                <span className={`grid h-6 w-6 flex-none place-items-center rounded-full text-xs font-bold ${
+                  s.state === 'done' ? 'bg-green-50 text-green-700' : s.state === 'active' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
+                }`}>
+                  {s.state === 'done' ? '✓' : i + 1}
+                </span>
+                <span>
+                  <span className={`block text-[13px] font-bold ${s.state === 'todo' ? 'text-gray-400' : s.state === 'done' ? 'text-green-700' : 'text-gray-900'}`}>{s.title}</span>
+                  <span className="block text-[11px] text-gray-400">{s.detail}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      })()}
+
       {selectedRound && (
         <>
           <AttendanceSheetSection
