@@ -7,7 +7,7 @@ import { SettlementRoundForm } from '@/components/sites/SettlementRoundForm'
 import { RoundPeriodEditor } from '@/components/settlement/RoundPeriodEditor'
 import { updateSiteExpenseBudgets } from '@/actions/siteBudgets'
 import { createSettlementRound } from '@/actions/settlementRounds'
-import { calcClaim } from '@/lib/settlement'
+import { calcClaim, remainingLabel } from '@/lib/settlement'
 import { EXPENSE_CATEGORY_LABELS, type ExpenseCategory } from '@/lib/constants'
 import type { Site, SettlementRound, SettlementRoundItem } from '@/types'
 
@@ -180,6 +180,7 @@ export default async function StaffSettlementPage({
                       ? Math.round(((i.contractAmount - i.remaining) / i.contractAmount) * 100)
                       : null
                     const filled = i.contractAmount > 0 && i.remaining <= 0
+                    const remain = remainingLabel(i.remaining, formatKRW)
                     return (
                       <tr key={i.category}>
                         <td className="py-2 text-gray-700">{EXPENSE_CATEGORY_LABELS[i.category as ExpenseCategory]}</td>
@@ -188,7 +189,7 @@ export default async function StaffSettlementPage({
                         {openRound && <td className="py-2 text-right text-gray-600">{formatKRW(i.usedAmount)}</td>}
                         {openRound && <td className="py-2 text-right font-medium text-gray-900">{formatKRW(i.claimAmount)}</td>}
                         <td className={`py-2 text-right font-medium ${i.contractAmount <= 0 ? 'text-gray-600' : filled ? 'text-blue-600' : 'text-red-600'}`}>
-                          {i.contractAmount > 0 ? formatKRW(i.remaining) : '-'}
+                          {i.contractAmount > 0 ? remain.text : '-'}
                         </td>
                         <td className={`py-2 text-right ${fillPct === null ? 'text-gray-400' : filled ? 'text-blue-600 font-semibold' : 'text-red-600'}`}>
                           {fillPct === null ? '-' : filled ? `충족 (${fillPct}%)` : `${fillPct}%`}
@@ -203,7 +204,7 @@ export default async function StaffSettlementPage({
                   {openRound && <td className="py-2 text-right text-gray-900">{formatKRW(claim.usedTotal)}</td>}
                   {openRound && <td className="py-2 text-right text-blue-700">{formatKRW(claim.claimTotal)}</td>}
                   <td className={`py-2 text-right ${budgetRemainAfter > 0 ? 'text-red-600' : 'text-blue-700'}`}>
-                    {formatKRW(budgetRemainAfter)}
+                    {remainingLabel(budgetRemainAfter, formatKRW).text}
                   </td>
                   <td className={`py-2 text-right ${budgetRemainAfter > 0 ? 'text-red-600' : 'text-blue-700'}`}>
                     {site.direct_expense_budget > 0
@@ -352,7 +353,7 @@ export default async function StaffSettlementPage({
             </div>
             <div className={`flex justify-between font-semibold ${budgetRemainAfter > 0 ? 'text-red-600' : 'text-blue-700'}`}>
               <span>잔액(미충당) (잠정)</span>
-              <span>{formatKRW(budgetRemainAfter)}</span>
+              <span>{remainingLabel(budgetRemainAfter, formatKRW).text}</span>
             </div>
           </div>
           {budgetRemainAfter > 0 && (

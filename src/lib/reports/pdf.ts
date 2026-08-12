@@ -196,8 +196,21 @@ function buildSummarySection(data: SettlementReportData, sectionNo: Map<string, 
   const contractPeriod = `${fmtDate(data.site.contract_start)}~${fmtDate(data.site.contract_end)}`
 
   const out: Content[] = [
-    { text: '건설사업관리용역 직접경비 정산서', fontSize: 16, bold: true, alignment: 'center', margin: [0, 0, 0, 14] },
+    {
+      text: `건설사업관리용역 직접경비 정산서${data.isProvisional ? ' (잠정)' : ''}`,
+      fontSize: 16, bold: true, alignment: 'center', margin: [0, 0, 0, data.isProvisional ? 6 : 14],
+    },
   ]
+
+  // 잠정본은 확정 전 미리보기 — 미제출 임시저장분까지 포함하므로 확정본과 금액이 다를 수 있다.
+  // 확정본과 파일이 구분되지 않으면 실수로 발주청에 제출될 수 있어 문서 첫머리에 명시한다.
+  if (data.isProvisional) {
+    out.push({
+      text: '※ 잠정본 — 확정 전 미리보기입니다. 아직 제출하지 않은 임시저장 내역까지 포함되어 확정 금액과 다를 수 있으며, 발주청 제출용이 아닙니다.',
+      fontSize: 9, bold: true, color: '#B91C1C', alignment: 'center',
+      margin: [0, 0, 0, 12],
+    })
+  }
 
   // 1. 계약내용
   out.push(sectionTitle('1. 계약내용'))
@@ -290,7 +303,15 @@ function buildSummarySection(data: SettlementReportData, sectionNo: Map<string, 
   body.push([tSum('합 계', { colSpan: 3 }), {}, {}, tSum(data.currentAmount), tSum(''), tSum('')])
   out.push(table([64, 84, '*', 72, '*', 30], body))
 
-  // 제출 문구 + 서명란
+  // 제출 문구 + 서명란 — 확정본에만. 잠정본에 넣으면 그대로 제출 가능한 문서처럼 보인다.
+  if (data.isProvisional) {
+    out.push({
+      text: '※ 이 문서는 잠정 미리보기이므로 제출 문구와 서명란이 포함되지 않습니다. 회차 확정 후 정식 정산서를 내려받으세요.',
+      fontSize: 9, color: '#5A6577', alignment: 'center', margin: [0, 18, 0, 0],
+    })
+    return out
+  }
+
   const now = new Date()
   const submitText = data.round
     ? `건설사업관리용역 ${data.round.round_no}회 기성에 대한 직접경비 사용내역을 위와 같이 제출합니다.`

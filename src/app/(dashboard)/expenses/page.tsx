@@ -103,8 +103,10 @@ export default async function ExpensesPage({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">월별 비용 내역</h1>
-          <p className="mt-1 text-sm text-gray-500">입력한 직접경비를 확인하고 본사에 제출하세요.</p>
+          <h1 className="text-xl font-bold text-gray-900">입력 내역 · 본사 제출</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            입력한 직접경비를 월별로 확인하고, 진행 중 기성회차 전체를 한 번에 본사로 제출합니다.
+          </p>
         </div>
         <Link
           href="/expenses/new"
@@ -132,7 +134,7 @@ export default async function ExpensesPage({
       {/* 요약 */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">총 입력액</p>
+          <p className="text-xs text-gray-500">이 달 입력액</p>
           <p className="mt-1 text-lg font-bold text-gray-900">{totalAmount.toLocaleString()}원</p>
           <p className="text-xs text-gray-400">{expenses.length}건</p>
         </div>

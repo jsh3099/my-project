@@ -7,7 +7,7 @@ import { SettlementRoundForm } from '@/components/sites/SettlementRoundForm'
 import { ConfirmRoundButton } from '@/components/sites/ConfirmRoundButton'
 import { ReportDownloadButton } from '@/components/settlement/ReportDownloadButton'
 import { buildCategorySummaryTree } from '@/lib/expenseSummaryTree'
-import { calcClaim } from '@/lib/settlement'
+import { calcClaim, remainingLabel } from '@/lib/settlement'
 import { EXPENSE_CATEGORY_LABELS, type ExpenseCategory } from '@/lib/constants'
 import type { SettlementRound, SettlementRoundItem } from '@/types'
 
@@ -256,7 +256,7 @@ export default async function SettlementRoundsPage({ params }: Props) {
                       <td className="py-2 text-right text-gray-600">{formatKRW(i.usedAmount)}</td>
                       <td className="py-2 text-right font-medium text-gray-900">{formatKRW(i.claimAmount)}</td>
                       <td className={`py-2 text-right font-medium ${i.contractAmount <= 0 ? 'text-gray-600' : i.remaining <= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                        {i.contractAmount > 0 ? formatKRW(i.remaining) : '-'}
+                        {i.contractAmount > 0 ? remainingLabel(i.remaining, formatKRW).text : '-'}
                       </td>
                     </tr>
                   ))}
@@ -267,7 +267,7 @@ export default async function SettlementRoundsPage({ params }: Props) {
                   <td className="py-2 text-right text-gray-900">{formatKRW(claim.usedTotal)}</td>
                   <td className="py-2 text-right text-blue-700">{formatKRW(claim.claimTotal)}</td>
                   <td className={`py-2 text-right ${budgetRemainAfter > 0 ? 'text-red-600' : 'text-blue-700'}`}>
-                    {formatKRW(budgetRemainAfter)}
+                    {remainingLabel(budgetRemainAfter, formatKRW).text}
                   </td>
                 </tr>
               </tbody>

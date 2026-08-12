@@ -29,6 +29,12 @@ export interface SettlementReportData {
   summaryTree: CategoryTotal[]            // 항목별 사용금액 (3번 표) — 인정금액 기준
   expenses: PersonExpense[]               // 세부 시트 원천 (자식 테이블 포함)
   periodLabel: string                     // 금회 정산기간 표기
+  /**
+   * 잠정본 여부 — 확정 전(진행 중 회차 또는 미편입 지출) 집계로 만든 미리보기.
+   * 아직 제출하지 않은 임시저장분까지 포함하므로 확정본과 금액이 다를 수 있고,
+   * 발주청 제출용이 아니다. 파일명·문서 표기로 확정본과 구분한다.
+   */
+  isProvisional: boolean
 }
 
 /** 인정금액 (amount - over_limit_amount) */
@@ -187,6 +193,7 @@ export async function getSettlementReportData(
     summaryTree,
     expenses: enriched,
     periodLabel,
+    isProvisional: round?.status !== 'confirmed',
   }
 }
 

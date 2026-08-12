@@ -86,11 +86,19 @@ function buildSummarySheet(wb: ExcelJS.Workbook, data: SettlementReportData, sec
   const SPAN = 7
 
   // 제목
-  const title = ws.addRow(['건설사업관리용역 직접경비 정산서'])
+  const title = ws.addRow([`건설사업관리용역 직접경비 정산서${data.isProvisional ? ' (잠정)' : ''}`])
   ws.mergeCells(title.number, 1, title.number, SPAN)
   title.getCell(1).font = { bold: true, size: 16 }
   title.getCell(1).alignment = { horizontal: 'center' }
   title.height = 30
+
+  // 잠정본은 미제출 임시저장분까지 포함한 확정 전 미리보기 — 확정본과 혼동되지 않게 명시
+  if (data.isProvisional) {
+    const note = ws.addRow(['※ 잠정본 — 확정 전 미리보기입니다. 아직 제출하지 않은 임시저장 내역까지 포함되어 확정 금액과 다를 수 있으며, 발주청 제출용이 아닙니다.'])
+    ws.mergeCells(note.number, 1, note.number, SPAN)
+    note.getCell(1).font = { bold: true, size: 9, color: { argb: 'FFB91C1C' } }
+    note.getCell(1).alignment = { horizontal: 'center', wrapText: true }
+  }
   ws.addRow([])
 
   // 1. 계약내용
@@ -196,6 +204,15 @@ function buildSummarySheet(wb: ExcelJS.Workbook, data: SettlementReportData, sec
   ws.addRow([])
 
   // 제출 문구 + 서명란
+  // 제출 문구·서명란은 확정본에만 (잠정본이 제출 가능한 문서처럼 보이지 않게)
+  if (data.isProvisional) {
+    const note = ws.addRow(['※ 이 문서는 잠정 미리보기이므로 제출 문구와 서명란이 포함되지 않습니다. 회차 확정 후 정식 정산서를 내려받으세요.'])
+    ws.mergeCells(note.number, 1, note.number, SPAN)
+    note.getCell(1).font = { size: 9, color: { argb: 'FF5A6577' } }
+    note.getCell(1).alignment = { horizontal: 'center', wrapText: true }
+    return
+  }
+
   const now = new Date()
   const roundNo = data.round?.round_no
   const submitText = roundNo

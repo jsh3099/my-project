@@ -41,8 +41,9 @@ export async function GET(request: Request) {
   const wb = buildSettlementWorkbook(data)
   const buffer = await wb.xlsx.writeBuffer()
 
-  const roundLabel = data.round ? `${data.round.round_no}회차` : '잠정'
-  const fileName = `${data.site.name}_직접경비정산서_${roundLabel}.xlsx`
+  // 잠정본은 파일명으로도 확정본과 구분한다 (내려받아 둔 뒤 실수로 제출하는 것을 막는다)
+  const roundLabel = data.round ? `${data.round.round_no}회차` : '미편입'
+  const fileName = `${data.site.name}_직접경비정산서_${roundLabel}${data.isProvisional ? '_잠정' : ''}.xlsx`
 
   return new NextResponse(buffer as ArrayBuffer, {
     headers: {

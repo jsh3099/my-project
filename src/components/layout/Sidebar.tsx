@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Building2, Users, LayoutDashboard, PlusCircle, ClipboardList, FileText, CalendarCheck, UsersRound, ListOrdered, Settings, CheckSquare } from 'lucide-react'
+import { Building2, Users, LayoutDashboard, PlusCircle, ClipboardList, FileText, CalendarCheck, UsersRound, ListOrdered, Settings, CheckSquare, Send } from 'lucide-react'
 import type { Role } from '@/lib/constants'
 
 interface SidebarProps {
@@ -10,30 +10,31 @@ interface SidebarProps {
   userName: string
 }
 
-const adminMenus = [
+// exact: 다른 메뉴의 경로 접두사인 항목 (예: /expenses 는 /expenses/new 의 접두사)
+// — startsWith 로 판정하면 하위 화면에서도 함께 활성으로 보이므로 정확히 일치할 때만 활성
+type Menu = { href: string; icon: typeof LayoutDashboard; label: string; exact?: boolean }
+
+const adminMenus: Menu[] = [
   { href: '/admin/sites', icon: Building2, label: '현장 관리' },
   { href: '/admin/users', icon: Users, label: '사용자 관리' },
   { href: '/hq/review', icon: CheckSquare, label: '제출 검토' },
   { href: '/expenses/new', icon: PlusCircle, label: '비용 입력' },
-  { href: '/expenses', icon: ClipboardList, label: '월별 내역' },
+  { href: '/expenses', icon: ClipboardList, label: '월별 내역', exact: true },
 ]
 
-const staffMenus = [
+// 입력(주재비·출장비·현장경비·출근부) → 제출 → 정산 확인 순서로 배치.
+// 「본사 제출」 버튼이 /expenses 에만 있어 사이드바에 없으면 제출 단계를 찾지 못한다.
+const staffMenus: Menu[] = [
   { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
   { href: '/expenses/staff-costs/resident', icon: UsersRound, label: '상주기술인 주재비' },
   { href: '/expenses/staff-costs/support', icon: UsersRound, label: '기술지원 출장비' },
   { href: '/expenses/new', icon: PlusCircle, label: '현장경비 입력' },
   { href: '/attendance', icon: CalendarCheck, label: '출근부' },
+  { href: '/expenses', icon: Send, label: '입력 내역·제출', exact: true },
   { href: '/settlement', icon: ListOrdered, label: '기성회차 정산' },
 ]
 
-const officerMenus = [
-  { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
-  { href: '/expenses/new', icon: PlusCircle, label: '비용 입력' },
-  { href: '/expenses', icon: ClipboardList, label: '월별 내역' },
-]
-
-const hqMenus = [
+const hqMenus: Menu[] = [
   { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
   { href: '/hq/overview', icon: FileText, label: '전체 현황' },
   { href: '/hq/review', icon: CheckSquare, label: '제출 검토' },
@@ -41,7 +42,7 @@ const hqMenus = [
   { href: '/admin/params', icon: Settings, label: '정산 기준 설정' },
   { href: '/admin/settlement', icon: ListOrdered, label: '기성회차' },
   { href: '/expenses/new', icon: PlusCircle, label: '비용 입력' },
-  { href: '/expenses', icon: ClipboardList, label: '월별 내역' },
+  { href: '/expenses', icon: ClipboardList, label: '월별 내역', exact: true },
 ]
 
 export function Sidebar({ role, userName }: SidebarProps) {
@@ -59,7 +60,9 @@ export function Sidebar({ role, userName }: SidebarProps) {
 
       <nav className="flex-1 space-y-1 px-3 py-4">
         {menus.map((menu) => {
-          const isActive = pathname === menu.href || (menu.href !== '/dashboard' && pathname.startsWith(menu.href))
+          const isActive = menu.exact || menu.href === '/dashboard'
+            ? pathname === menu.href
+            : pathname === menu.href || pathname.startsWith(`${menu.href}/`)
           return (
             <Link
               key={menu.href}

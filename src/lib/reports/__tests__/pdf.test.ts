@@ -119,6 +119,7 @@ const data: SettlementReportData = {
   ),
   expenses,
   periodLabel: '2026.05.01~2026.07.31',
+  isProvisional: false,
 } as unknown as SettlementReportData
 
 describe('정산서 PDF (F-22)', () => {
@@ -146,6 +147,24 @@ describe('정산서 PDF (F-22)', () => {
     expect(flat).toContain('www.opinet.co.kr')
     // 유가 기준일이 있으면 고시일, 없으면 기간 평균으로 표기
     expect(flat).toContain('오피넷 2026.07.01 고시')
+  })
+
+  it('확정본에는 제출 문구와 서명란이 들어간다', () => {
+    const flat = JSON.stringify(buildDocDefinition(data).content)
+    expect(flat).toContain('위와 같이 제출합니다')
+    expect(flat).toContain('대표이사')
+    expect(flat).not.toContain('잠정본')
+  })
+
+  it('잠정본은 제목·경고로 구분되고 제출 문구·서명란이 빠진다', () => {
+    const flat = JSON.stringify(
+      buildDocDefinition({ ...data, isProvisional: true } as SettlementReportData).content,
+    )
+    expect(flat).toContain('직접경비 정산서 (잠정)')
+    expect(flat).toContain('발주청 제출용이 아닙니다')
+    // 확정본으로 오인해 그대로 제출하지 못하도록 서명란은 넣지 않는다
+    expect(flat).not.toContain('위와 같이 제출합니다')
+    expect(flat).not.toContain('대표이사')
   })
 
   it('유가 기준일이 없으면 기간 평균으로 표기한다', () => {

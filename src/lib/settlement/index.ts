@@ -11,3 +11,4 @@ export { calcItemized, type ItemInput, type ItemizedResult } from './itemizedCal
 export { calcWelfare, type WelfareCalcInput, type WelfareCalcResult } from './welfareCalc'
 export { calcClaim, type ClaimCalcInput, type ClaimCalcResult, type ClaimItemInput, type ClaimItemResult } from './claimCalc'
 export { convertJeonseToMonthly } from './lodgingCalc'
+export { remainingLabel, type RemainingLabel } from './remainingLabel'
