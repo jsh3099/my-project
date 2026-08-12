@@ -12,6 +12,10 @@ const THIN = { style: 'thin' as const, color: { argb: 'FF999999' } }
 const BORDER = { top: THIN, left: THIN, bottom: THIN, right: THIN }
 const HEAD_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } }
 const SUBTOTAL_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F7F7' } }
+// F-23의 남은 절반 — 아직 어느 행에도 적용하지 않았다.
+// "합계에서 제외"는 인정금액(recognized = amount − 불인정분) 기준 집계로 구현됐지만,
+// "불인정 항목 별도 음영 처리"는 미구현이다. 미사용 경고는 그 미구현을 가리키는 표시이므로
+// 지우지 말 것 — 지우면 남은 요구사항의 유일한 흔적이 사라진다.
 const REJECT_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } }
 
 function num(n: number | null | undefined): number | string {

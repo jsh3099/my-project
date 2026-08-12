@@ -150,7 +150,6 @@ export default async function StaffSettlementPage({
 
       {/* 항목별 계상금액 입력 — 내역서의 계상금액을 기재해야 사용액·잔액 추적이 시작된다 */}
       <SiteBudgetForm
-        siteId={siteId}
         budgets={Object.fromEntries(budgetByCategory) as Partial<Record<ExpenseCategory, number>>}
         action={updateSiteExpenseBudgets.bind(null, siteId)}
       />

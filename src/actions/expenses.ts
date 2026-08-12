@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { expenseSchema } from '@/lib/validations/expense'
 import { calcCommute, calcItemized, calcTripVisit, calcWelfare, sumTripVisits, convertJeonseToMonthly } from '@/lib/settlement'
 import { FUEL_EFFICIENCY, type CommuteMode, type VehicleFuelType } from '@/lib/constants'
+import { receiptStoredValue } from '@/lib/storage/receipts'
 import type { LodgingCalcDetail } from '@/types'
 
 export async function createExpense(formData: FormData) {
@@ -50,8 +51,8 @@ export async function createExpense(formData: FormData) {
       continue
     }
 
-    const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(path)
-    receiptUrls.push(urlData.publicUrl)
+    // 비공개 버킷이므로 경로를 저장한다 — 열람은 `/api/receipts`가 서명해 넘긴다
+    receiptUrls.push(receiptStoredValue(path, file.name))
   }
 
   // 건별 내역·VAT·복리후생 파라미터 — 클라이언트 금액은 참고값, 서버가 재계산해 확정한다
@@ -234,8 +235,7 @@ export async function createStaffCosts(formData: FormData) {
         .from('receipts')
         .upload(path, file, { contentType: file.type })
       if (uploadError) { console.error('Upload error:', uploadError); continue }
-      const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(path)
-      urls.push(urlData.publicUrl)
+      urls.push(receiptStoredValue(path, file.name))
     }
     if (urls.length) receiptUrlsByRowSub[key] = urls
   }
@@ -593,7 +593,7 @@ export async function attachStaffCostReceipt(formData: FormData) {
       .from('receipts')
       .upload(path, file, { contentType: file.type })
     if (uploadError) return { error: `업로드 실패: ${uploadError.message}` }
-    added.push(supabase.storage.from('receipts').getPublicUrl(path).data.publicUrl)
+    added.push(receiptStoredValue(path, file.name))
   }
 
   const merged = [...new Set([...draft.receiptUrls, ...added])]
@@ -752,8 +752,7 @@ export async function createSupportTrips(formData: FormData) {
         .from('receipts')
         .upload(path, file, { contentType: file.type })
       if (uploadError) { console.error('Upload error:', uploadError); continue }
-      const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(path)
-      urls.push(urlData.publicUrl)
+      urls.push(receiptStoredValue(path, file.name))
     }
     if (urls.length) receiptUrlsByRow[key.split('::')[1]] = urls
   }

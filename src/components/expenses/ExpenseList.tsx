@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { Trash2, Send, ChevronDown, ChevronUp, Receipt } from 'lucide-react'
 import { EXPENSE_CATEGORY_LABELS, EXPENSE_SUBCATEGORIES, type ExpenseCategory } from '@/lib/constants'
 import { deleteExpense, submitExpenses } from '@/actions/expenses'
+import { receiptHref } from '@/lib/storage/receipts'
 import { useRouter } from 'next/navigation'
 import type { Expense } from '@/types'
 
@@ -40,9 +41,13 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft, round = nul
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [submitConfirm, setSubmitConfirm] = useState(false)
   const [message, setMessage] = useState('')
+  // 삭제 확인은 화면 안에서 받는다 — window.confirm은 미리보기 패널 등 일부 환경에서
+  // 대화상자 없이 즉시 false를 반환해 "눌러도 아무 일 없는" 상태가 된다.
+  // 같은 화면의 본사 제출(submitConfirm)과 같은 2단계 방식으로 통일한다.
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const handleDelete = (id: string) => {
-    if (!confirm('이 비용 항목을 삭제하시겠어요?')) return
+    setDeleteConfirmId(null)
     startTransition(async () => {
       const result = await deleteExpense(id)
       if (result.error) setMessage(result.error)
@@ -187,7 +192,7 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft, round = nul
                         {expense.receipt_urls.map((url, i) => (
                           <a
                             key={i}
-                            href={url}
+                            href={receiptHref(url)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50"
@@ -200,14 +205,34 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft, round = nul
                     </div>
                   )}
                   {(expense.status === 'draft' || expense.status === 'rejected') && (
-                    <button
-                      onClick={() => handleDelete(expense.id)}
-                      disabled={isPending}
-                      className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      {expense.status === 'rejected' ? '삭제 후 재입력' : '삭제'}
-                    </button>
+                    deleteConfirmId === expense.id ? (
+                      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                        <span className="text-xs text-red-700">
+                          <b>{getSubLabel(expense.category, expense.subcategory)} {expense.amount.toLocaleString()}원</b>을 삭제하면 목록·정산에서 빠집니다. 삭제할까요?
+                        </span>
+                        <button
+                          onClick={() => handleDelete(expense.id)}
+                          disabled={isPending}
+                          className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          {isPending ? '삭제 중...' : '삭제'}
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirmId(null)}
+                          className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                        >취소</button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setDeleteConfirmId(expense.id)}
+                        disabled={isPending}
+                        className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {expense.status === 'rejected' ? '삭제 후 재입력' : '삭제'}
+                      </button>
+                    )
                   )}
                 </div>
               )}

@@ -51,7 +51,11 @@ describe.skipIf(!fs.existsSync(CERT_DIR))('배포용 테스트 재직증명서 �
     expect(addr).not.toContain('선엔지니어링')
     expect(addr).not.toContain('건설사업관리단')
   })
+})
 
+// 이 검증은 PDF가 필요 없다(문자열 입력) — 위 skipIf 블록 안에 있어 픽스처 없는 기기에서
+// 함께 건너뛰어지던 것을 밖으로 꺼냈다. 어디서든 돌아야 하는 검증이다.
+describe('거주지 증빙 주소 인식 — 오인 방지', () => {
   // 소속(회사 주소)·용도 줄이 자택주소로 잘못 잡히면 산출 출발지가 오염된다
   it('소속·용도 줄을 주소로 오인하지 않는다', () => {
     expect(parseResidenceAddress(['소속 선엔지니어링 (테스트) 도매시장 5회차 건설사업관리단'])).toBe('')

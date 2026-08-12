@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { PlusCircle, ClipboardList, AlertTriangle, CheckCircle, Clock, TrendingUp, Wallet } from 'lucide-react'
+import { PlusCircle, ClipboardList, AlertTriangle, TrendingUp, Wallet } from 'lucide-react'
 import { EXPENSE_CATEGORY_LABELS, EXPENSE_STATUS_LABELS, type ExpenseCategory } from '@/lib/constants'
 import { SiteAddressCard } from '@/components/sites/SiteAddressCard'
 import type { Expense, Site, SettlementRoundItem } from '@/types'
@@ -56,7 +56,6 @@ export default async function DashboardPage() {
   const totalAmount = expenses.reduce((s, e) => s + e.amount, 0)
   const overLimitCount = expenses.filter((e) => e.is_over_limit).length
   const submittedCount = expenses.filter((e) => e.status === 'submitted').length
-  const approvedCount = expenses.filter((e) => e.status === 'approved').length
 
   // 비목별 합계
   const byCategory: Record<string, number> = {}

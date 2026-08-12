@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Check, X, Receipt, ChevronDown, ChevronUp } from 'lucide-react'
 import { EXPENSE_CATEGORY_LABELS, EXPENSE_SUBCATEGORIES, type ExpenseCategory } from '@/lib/constants'
 import { approveExpenses, rejectExpense } from '@/actions/review'
+import { receiptHref } from '@/lib/storage/receipts'
 
 export interface ReviewExpense {
   id: string
@@ -212,7 +213,7 @@ export function ReviewList({ expenses }: Props) {
                           {e.receiptUrls.map((url, i) => (
                             <a
                               key={i}
-                              href={url}
+                              href={receiptHref(url)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50"

@@ -5,7 +5,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import { EXPENSE_CATEGORY_LABELS, type ExpenseCategory } from '@/lib/constants'
 
 interface Props {
-  siteId: string
+  // siteId는 받지 않는다 — action이 이미 현장에 bind되어 넘어온다 (중복 원천 제거)
   /** category → amount (기존 저장값) */
   budgets: Partial<Record<ExpenseCategory, number>>
   action: (formData: FormData) => Promise<{ error: string } | { success: boolean }>
@@ -18,7 +18,7 @@ function formatKRW(n: number) {
 }
 
 /** 항목별 계상금액 입력 카드 — 계약 내역서의 직접경비 항목별 금액을 기재한다 */
-export function SiteBudgetForm({ siteId, budgets, action }: Props) {
+export function SiteBudgetForm({ budgets, action }: Props) {
   const hasAny = Object.values(budgets).some((v) => (v ?? 0) > 0)
   const [open, setOpen] = useState(!hasAny)
   const [error, setError] = useState<string | null>(null)

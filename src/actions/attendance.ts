@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import type { StaffType, ResidenceType } from '@/lib/constants'
 import { extractPdfLines, parseResidentDays, parseSupportVisits } from '@/lib/attendance/parseSheet'
 import { parseResidenceAddress } from '@/lib/receipts/parseReceipt'
+import { RECEIPTS_BUCKET, receiptStoragePath, receiptStoredValue } from '@/lib/storage/receipts'
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
@@ -69,11 +70,10 @@ export async function upsertAttendance(formData: FormData) {
       console.error('Attendance sheet upload error:', uploadError)
       return { error: '출근부 파일 업로드에 실패했습니다: ' + uploadError.message }
     }
-    const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(path)
-    // 원본 파일명은 URL 프래그먼트로 함께 보관한다 — 화면 첨부 칩이 "어떤 출근부인지" 보여줘야 하는데,
-    // 스토리지 키에는 한글·`~`를 넣을 수 없다(Invalid key). 프래그먼트는 서버로 전송되지 않아
-    // 링크 열기·다운로드에는 영향이 없다.
-    newUrls.push(`${urlData.publicUrl}#${encodeURIComponent(file.name)}`)
+    // 버킷이 비공개이므로 열람 주소가 아니라 **경로**를 저장한다 — 열람은 `/api/receipts`가
+    // 클릭 시점에 서명해 넘긴다. 원본 파일명은 프래그먼트로 함께 보관한다(화면 첨부 칩 표시용,
+    // 스토리지 키에는 한글·`~`를 넣을 수 없다). 자세한 규약은 `@/lib/storage/receipts` 참고.
+    newUrls.push(receiptStoredValue(path, file.name))
   }
 
   // 기존 첨부 유지 목록 (화면에서 삭제한 파일은 제외되어 넘어온다)
@@ -329,9 +329,8 @@ export async function uploadResidenceDoc(memberId: string, formData: FormData) {
       console.error('Residence doc upload error:', uploadError)
       return { error: '거주지 증빙 업로드에 실패했습니다: ' + uploadError.message }
     }
-    const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(path)
-    // 원본 파일명은 URL 프래그먼트로 보관 (출근부 첨부와 같은 관례 — 스토리지 키에 한글 불가)
-    newUrls.push(`${urlData.publicUrl}#${encodeURIComponent(file.name)}`)
+    // 출근부 첨부와 같은 규약 — 경로 + 원본 파일명 프래그먼트 (열람은 `/api/receipts`가 서명)
+    newUrls.push(receiptStoredValue(path, file.name))
   }
 
   // 첨부 PDF에서 자택주소를 인식해 채운다 — 교통비·출장비 산출의 출발지가 되는 값이라
@@ -368,15 +367,6 @@ export async function uploadResidenceDoc(memberId: string, formData: FormData) {
   return { success: true, parsedAddress }
 }
 
-// 저장된 공개 URL에서 스토리지 경로를 되돌린다 (#원본파일명 프래그먼트 제거)
-function storagePathFromUrl(url: string): string | null {
-  const bare = url.split('#')[0]
-  const marker = '/object/public/receipts/'
-  const i = bare.indexOf(marker)
-  if (i < 0) return null
-  return decodeURIComponent(bare.slice(i + marker.length))
-}
-
 // 이미 첨부된 거주지 증빙에서 자택주소를 다시 인식한다.
 // 첨부는 업로드 시점에만 인식하므로, 기능이 없던 때 올린 증빙이나 인식 실패분을 위해 필요하다.
 export async function reparseResidenceAddress(memberId: string) {
@@ -399,13 +389,14 @@ export async function reparseResidenceAddress(memberId: string) {
     return { error: '인식할 PDF 증빙이 없습니다. 주소를 직접 입력하세요. (사진·스캔 이미지는 인식 대상이 아닙니다)' }
   }
 
-  // 저장소는 비공개라 공개 URL로는 못 읽는다 — 서비스 권한으로 내려받아 텍스트만 추출한다
+  // 저장소는 비공개라 링크로는 못 읽는다 — 서비스 권한으로 내려받아 텍스트만 추출한다.
+  // 경로 파서는 신규(경로)·레거시(공개 URL) 저장값을 모두 읽으므로 옛 첨부도 재인식된다.
   const admin = createAdminClient()
   let parsed = ''
   for (const url of urls) {
-    const path = storagePathFromUrl(url)
+    const path = receiptStoragePath(url)
     if (!path) continue
-    const { data: blob, error: dlError } = await admin.storage.from('receipts').download(path)
+    const { data: blob, error: dlError } = await admin.storage.from(RECEIPTS_BUCKET).download(path)
     if (dlError || !blob) {
       console.error('Residence doc download error:', dlError)
       continue

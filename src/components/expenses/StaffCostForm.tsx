@@ -12,6 +12,7 @@ import {
   type StaffCostItemTarget,
 } from '@/actions/expenses'
 import type { AttendanceRecord, SiteStaffMember, LodgingCalcDetail } from '@/types'
+import { receiptFileName, receiptHref } from '@/lib/storage/receipts'
 import { calcWorkDays } from '@/lib/korean-holidays'
 import {
   SPECIALTIES,
@@ -265,9 +266,9 @@ function ReceiptPanel({ savedByCategory, onAdd, onRemoveSaved, uploading, maxFil
           {saved.map(({ cat, url }) => (
             <div key={url} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 py-1.5 shadow-sm">
               <div className="flex h-8 w-8 items-center justify-center rounded bg-green-50 text-xs font-bold text-green-600">저장</div>
-              <a href={url} target="_blank" rel="noreferrer"
+              <a href={receiptHref(url)} target="_blank" rel="noreferrer" title={receiptFileName(url)}
                 className="max-w-[130px] truncate text-xs font-medium text-blue-600 hover:underline">
-                {decodeURIComponent(url.split('/').pop() ?? '첨부')}
+                {receiptFileName(url)}
               </a>
               <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${CATEGORY_COLORS[cat]}`}>{cat}</span>
               <button type="button" onClick={() => onRemoveSaved(cat, url)}
@@ -1100,8 +1101,9 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
               {savedList.map(({ cat, url }) => (
                 <span key={url} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs shadow-sm">
                   <span className={`h-2 w-2 rounded-sm ${CATEGORY_DOT[cat]}`} />
-                  <a href={url} target="_blank" rel="noreferrer" className="max-w-[130px] truncate font-medium text-blue-600 hover:underline">
-                    {decodeURIComponent(url.split('/').pop() ?? '첨부')}
+                  <a href={receiptHref(url)} target="_blank" rel="noreferrer" title={receiptFileName(url)}
+                    className="max-w-[130px] truncate font-medium text-blue-600 hover:underline">
+                    {receiptFileName(url)}
                   </a>
                   <button type="button" onClick={() => removeSavedReceipt(id, cat, url)} aria-label="첨부 제거"
                     className="text-gray-300 hover:text-red-500">✕</button>

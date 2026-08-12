@@ -24,6 +24,7 @@ import {
 } from '@/actions/siteExpenses'
 import { parseExpenseReceipt } from '@/actions/receiptParse'
 import { calcItemized, calcWelfare } from '@/lib/settlement'
+import { receiptFileName, receiptHref } from '@/lib/storage/receipts'
 
 // 서버에서 복원하는 draft (월 × 세부항목 1건)
 export interface SiteExpenseCardDraft {
@@ -242,12 +243,24 @@ export function SiteExpenseBoard({
     setOpenCards((p) => { const n = new Set(p); if (n.has(key)) n.delete(key); else n.add(key); return n })
   }
 
-  function removeCard(key: string) {
+  // 닫기 확인은 화면 안에서 받는다 — window.confirm은 미리보기 패널 등 일부 환경에서
+  // 대화상자 없이 즉시 false를 반환해 "눌러도 아무 일 없는" 상태가 된다.
+  // (출근부 화면 인원 제외와 같은 방식 — 카드 아래 빨간 띠로 확인)
+  const [closeConfirmKey, setCloseConfirmKey] = useState<string | null>(null)
+
+  function requestRemoveCard(key: string) {
     const card = cards.find((c) => c.key === key)
     if (!card) return
+    // 저장된 내역·첨부가 있으면 "화면에서만 닫힌다"는 점을 먼저 알린다
     if (card.savedTotal > 0 || card.receiptUrls.length > 0) {
-      if (!window.confirm('저장된 내역·첨부가 있는 항목입니다. 화면에서만 닫습니다 — 저장된 값을 지우려면 내역을 비우고 저장하세요.')) return
+      setCloseConfirmKey(key)
+      return
     }
+    removeCard(key)
+  }
+
+  function removeCard(key: string) {
+    setCloseConfirmKey(null)
     setCards((p) => p.filter((c) => c.key !== key))
     setSheetKey((p) => (p === key ? null : p))
   }
@@ -502,10 +515,25 @@ export function SiteExpenseBoard({
             </div>
             <button type="button" onClick={() => toggleOpen(card.key)} aria-expanded={isOpen} aria-label="상세 접기/펼치기"
               className={`rounded p-1 text-gray-400 transition-transform hover:bg-gray-100 ${isOpen ? 'rotate-180' : ''}`}>▾</button>
-            <button type="button" onClick={() => removeCard(card.key)} title="카드 닫기"
+            <button type="button" onClick={() => requestRemoveCard(card.key)} title="카드 닫기"
               className="rounded p-1 text-gray-300 hover:bg-red-50 hover:text-red-500">✕</button>
           </div>
         </div>
+
+        {/* 닫기 확인 띠 — 저장된 값은 지워지지 않는다는 점이 오해 지점이라 문장으로 남긴다 */}
+        {closeConfirmKey === card.key && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-red-100 bg-red-50 px-4 py-2.5">
+            <span className="text-xs text-red-700">
+              저장된 내역·첨부가 있는 항목입니다. <b>화면에서만 닫습니다</b> — 저장된 값을 지우려면 내역을 비우고 저장하세요.
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <button type="button" onClick={() => removeCard(card.key)}
+                className="rounded-lg bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700">닫기</button>
+              <button type="button" onClick={() => setCloseConfirmKey(null)}
+                className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50">취소</button>
+            </div>
+          </div>
+        )}
 
         {isOpen && (
           <>
@@ -644,8 +672,9 @@ export function SiteExpenseBoard({
               <span className="text-xs font-semibold text-gray-500">증빙 {card.receiptUrls.length}</span>
               {card.receiptUrls.map((url) => (
                 <span key={url} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs">
-                  <a href={url} target="_blank" rel="noreferrer" className="max-w-[180px] truncate text-blue-600 hover:underline">
-                    {decodeURIComponent(url.split('/').pop() ?? '첨부')}
+                  <a href={receiptHref(url)} target="_blank" rel="noreferrer" title={receiptFileName(url)}
+                    className="max-w-[180px] truncate text-blue-600 hover:underline">
+                    {receiptFileName(url)}
                   </a>
                   <button type="button" onClick={() => removeReceipt(card.key, url)} aria-label="첨부 제거"
                     className="text-gray-300 hover:text-red-500">✕</button>

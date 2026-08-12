@@ -10,6 +10,8 @@ import path from 'path'
 import pdfmake from 'pdfmake'
 import type { Content, ContentText, TableCell, TDocumentDefinitions } from 'pdfmake/interfaces'
 import { EXPENSE_SUBCATEGORIES, EXPENSE_CATEGORY_LABELS, STAFF_TYPE_LABELS, type ExpenseCategory } from '@/lib/constants'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { RECEIPTS_BUCKET, isImageReceipt, receiptStoragePath } from '@/lib/storage/receipts'
 import type { SettlementReportData, PersonExpense } from './reportData'
 import { recognized, buildSectionNumbers } from './reportData'
 
@@ -45,6 +47,10 @@ export async function buildSettlementPdfBuffer(data: SettlementReportData): Prom
 // 교통비·출장비 산출서에 첨부된 지도 캡처(이미지)를 임베드한다.
 // 산출서 자체는 저장된 경로 데이터(카카오)로 자동 생성되므로 이미지는 보조 자료 —
 // 없거나 가져오기에 실패해도 산출서는 텍스트 근거만으로 완성된다.
+//
+// 첨부는 비공개 버킷에 있으므로 HTTP로 가져오지 않고 **서비스 권한으로 직접 내려받는다**.
+// (종전에는 죽은 공개 URL을 fetch한 뒤 실패를 조용히 삼켜, 지도가 왜 빠졌는지 알 수 없었다 —
+//  실패는 산출서를 막지 않되 반드시 로그로 남긴다)
 
 const CALC_IMG_MAX_BYTES = 8 * 1024 * 1024
 
@@ -56,19 +62,40 @@ function calcSheetTargets(data: SettlementReportData): PersonExpense[] {
 
 export async function collectCalcSheetImages(data: SettlementReportData): Promise<Record<string, string>> {
   const images: Record<string, string> = {}
+
+  const targets: { e: PersonExpense; stored: string }[] = []
+  for (const e of calcSheetTargets(data)) {
+    const stored = (e.receipt_urls ?? []).find(isImageReceipt)
+    if (stored) targets.push({ e, stored })
+  }
+  // 임베드할 캡처가 없으면 저장소 클라이언트를 만들지 않는다 —
+  // 지도 첨부 없는 정산서가 저장소 설정(env)에 묶이지 않게 한다
+  if (targets.length === 0) return images
+
+  const admin = createAdminClient()
   await Promise.all(
-    calcSheetTargets(data).map(async (e) => {
-      const url = (e.receipt_urls ?? []).find((u) => /\.(png|jpe?g)(\?|$)/i.test(u))
-      if (!url) return
+    targets.map(async ({ e, stored }) => {
+      const storagePath = receiptStoragePath(stored)
+      if (!storagePath) {
+        console.error('[pdf] 지도 캡처 경로를 읽을 수 없습니다:', stored)
+        return
+      }
       try {
-        const res = await fetch(url)
-        if (!res.ok) return
-        const buf = Buffer.from(await res.arrayBuffer())
-        if (buf.length === 0 || buf.length > CALC_IMG_MAX_BYTES) return
-        const mime = /\.png(\?|$)/i.test(url) ? 'image/png' : 'image/jpeg'
+        const { data: blob, error } = await admin.storage.from(RECEIPTS_BUCKET).download(storagePath)
+        if (error || !blob) {
+          console.error('[pdf] 지도 캡처 내려받기 실패:', storagePath, error?.message)
+          return
+        }
+        const buf = Buffer.from(await blob.arrayBuffer())
+        if (buf.length === 0 || buf.length > CALC_IMG_MAX_BYTES) {
+          console.error('[pdf] 지도 캡처 크기가 임베드 범위를 벗어났습니다:', storagePath, buf.length)
+          return
+        }
+        const mime = /\.png(#|\?|$)/i.test(stored) ? 'image/png' : 'image/jpeg'
         images[`calcimg_${e.id}`] = `data:${mime};base64,${buf.toString('base64')}`
-      } catch {
-        // 이미지 임베드 실패는 무시 — 산출서는 텍스트 근거로 완성
+      } catch (err) {
+        // 임베드 실패가 정산서 생성을 막지는 않는다 — 산출서는 텍스트 근거로 완성된다
+        console.error('[pdf] 지도 캡처 임베드 오류:', storagePath, err)
       }
     }),
   )

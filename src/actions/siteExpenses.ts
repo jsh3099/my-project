@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { calcItemized, calcWelfare } from '@/lib/settlement'
 import { EXPENSE_SUBCATEGORIES, type ExpenseCategory } from '@/lib/constants'
+import { receiptStoredValue } from '@/lib/storage/receipts'
 
 export interface SiteExpenseItemInput {
   date: string
@@ -289,7 +290,7 @@ export async function attachSiteExpenseReceipt(
       .from('receipts')
       .upload(path, file, { contentType: file.type })
     if (uploadError) return { error: `업로드 실패: ${uploadError.message}` }
-    added.push(supabase.storage.from('receipts').getPublicUrl(path).data.publicUrl)
+    added.push(receiptStoredValue(path, file.name))
   }
 
   const merged = [...new Set([...draft.receiptUrls, ...added])]

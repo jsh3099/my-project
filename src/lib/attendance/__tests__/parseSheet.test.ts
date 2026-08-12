@@ -38,6 +38,13 @@ describe('출근부 PDF 자동 인식', () => {
     expect(result.강희철).toBe(22) // 기간 행이 아니라 총괄표 행에서 읽어야 함
   })
 
+  // 총괄표 헤더에 두 이름이 모두 있으므로, 명부 순서가 달라도 열 순서를 헤더에서 잡아낸다.
+  // 배포용 증빙에서만 검증하던 것을 커밋된 픽스처로 옮겨 어디서든 돌게 했다.
+  it('상주: 명부 순서가 표와 달라도 열을 이름으로 맞춘다', () => {
+    const result = parseResidentDays(residentLines, ['성혁기', '강희철'], 2026, 7)
+    expect(result).toEqual({ 강희철: 23, 성혁기: 23 })
+  })
+
   it('기술지원: 해당 월의 방문일자만 인원별로 추출한다', () => {
     const jul = parseSupportVisits(supportLines, SUPPORT_NAMES, 2026, 7)
     expect(jul).toEqual({

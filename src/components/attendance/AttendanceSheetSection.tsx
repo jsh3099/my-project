@@ -14,6 +14,7 @@ import {
   type ResidenceType,
 } from '@/lib/constants'
 import type { AttendanceRecord, SiteStaffMember } from '@/types'
+import { receiptFileName, receiptHref } from '@/lib/storage/receipts'
 
 interface Props {
   siteId: string
@@ -54,11 +55,14 @@ export function AttendanceSheetSection({
   const [isMemberPending, startMemberTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  // 기존 첨부 중 유지할 것 (X 클릭 시 제외 → 저장 시 삭제 처리)
-  const [keptUrls, setKeptUrls] = useState<string[]>(sheetFileUrls)
-  // 저장 후 router.refresh()로 서버 첨부 목록이 갱신되면 화면도 따라간다
-  // (새로 업로드된 파일이 기존 첨부 칩으로 나타난다)
-  useEffect(() => { setKeptUrls(sheetFileUrls) }, [sheetFileUrls])
+  // 기존 첨부 중 화면에서 제외한 것 (X 클릭 → 저장 시 삭제 처리).
+  // 서버 목록을 로컬 state로 복사하지 않고 "제외한 것"만 담아 파생값으로 만든다 —
+  // 복사하면 저장 후 router.refresh()로 갱신된 prop을 effect에서 다시 setState해야 하고
+  // (cascading render, react-hooks/set-state-in-effect), 새로 올린 파일이 칩으로 나타나는
+  // 흐름도 그 동기화에 의존하게 된다. 파생값은 prop이 바뀌면 그대로 따라간다.
+  // 제외분은 저장 시 서버에서 실제로 지워지므로 removed에 남은 값은 이후 무해하다.
+  const [removedUrls, setRemovedUrls] = useState<Set<string>>(new Set())
+  const keptUrls = sheetFileUrls.filter((u) => !removedUrls.has(u))
   // 새로 선택한 파일 이름 (input.files에 담겨 있다가 저장 시 업로드)
   const [pickedNames, setPickedNames] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -295,14 +299,6 @@ export function AttendanceSheetSection({
     })
   }
 
-  // 첨부 표시 이름 — 업로드 시 URL 프래그먼트에 담아둔 원본 파일명을 쓴다.
-  // 프래그먼트가 없는 과거 첨부는 스토리지 파일명(타임스탬프_랜덤.pdf)으로 대체한다.
-  function attachmentName(url: string): string {
-    const hash = url.split('#')[1]
-    if (hash) return decodeURIComponent(hash)
-    return decodeURIComponent(url.split('/').pop() ?? '') || '첨부파일'
-  }
-
   // 기존 기록을 비우는 저장의 2단계 확정 플래그 (첫 클릭=경고, 두 번째 클릭=반영)
   const [clearArmed, setClearArmed] = useState(false)
 
@@ -475,13 +471,13 @@ export function AttendanceSheetSection({
           <span key={url} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs">
             <input type="hidden" name="kept_file_urls" value={url} />
             <span className={`h-2 w-2 rounded-sm ${isSupport ? 'bg-teal-500' : 'bg-purple-500'}`} aria-hidden="true" />
-            <a href={url} target="_blank" rel="noreferrer" title={attachmentName(url)}
+            <a href={receiptHref(url)} target="_blank" rel="noreferrer" title={receiptFileName(url)}
               className="max-w-[220px] truncate text-blue-600 hover:underline">
-              {attachmentName(url)}
+              {receiptFileName(url)}
             </a>
             <button
               type="button"
-              onClick={() => setKeptUrls((prev) => prev.filter((u) => u !== url))}
+              onClick={() => setRemovedUrls((prev) => new Set(prev).add(url))}
               className="text-gray-300 hover:text-red-500"
               aria-label="첨부 제거"
             >✕</button>
@@ -581,10 +577,10 @@ export function AttendanceSheetSection({
                       </button>
                     </span>
                   ) : (
-                    <span key={url} title={attachmentName(url)}
+                    <span key={url} title={receiptFileName(url)}
                       className="mt-1 inline-flex max-w-full items-center rounded-full bg-green-50 py-0.5 pl-2 pr-0.5 text-[10.5px] font-semibold text-green-700">
                       <span aria-hidden="true">✓</span>
-                      <a href={url} target="_blank" rel="noreferrer" className="ml-1 max-w-[84px] truncate hover:underline">
+                      <a href={receiptHref(url)} target="_blank" rel="noreferrer" className="ml-1 max-w-[84px] truncate hover:underline">
                         거주지 증빙
                       </a>
                       {/* 제거 버튼 — 링크 오탭 방지: 구분선으로 떼고, 눌리는 영역을 여백 밖까지 넓힌다 */}

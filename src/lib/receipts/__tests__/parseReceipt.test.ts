@@ -13,6 +13,19 @@ describe('영수증 금액 자동 인식', () => {
     expect(parseRentTotal(lines)).toBe(2_500_000) // 500,000 × 5개월
   })
 
+  // 표지 요약표가 "이체금액" 문구를 쓰면 월별 이체금액과 이중 합산된다.
+  // 배포용 증빙에서만 검증하던 것을 커밋된 픽스처로 옮겨 어디서든 돌게 했다.
+  it('숙소임대비: 표지 요약표가 이체금액 합산에 중복 계상되지 않는다', async () => {
+    const lines = await extractPdfLines(read('rent_2026-04~08.pdf'))
+    expect(lines.filter((l) => /이체금액\s*[\d,]+\s*원/.test(l))).toHaveLength(5)
+  })
+
+  // 임대비 문서에서 관리비(전기·가스) 항목이 잘못 잡히면 관리비 칸이 오염된다
+  it('숙소임대비: 임대비 문서에서 관리비 항목은 인식되지 않는다', async () => {
+    const lines = await extractPdfLines(read('rent_2026-04~08.pdf'))
+    expect(parseMaintItems(lines)).toEqual([])
+  })
+
   it('관리비: 단월 납입확인서에서 전기·가스 건별 내역을 추출한다', async () => {
     const lines = await extractPdfLines(read('maint_single_2026-07.pdf'))
     const items = parseMaintItems(lines)
