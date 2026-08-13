@@ -333,30 +333,35 @@ export async function uploadResidenceDoc(memberId: string, formData: FormData) {
     newUrls.push(receiptStoredValue(path, file.name))
   }
 
-  // 첨부 PDF에서 자택주소를 인식해 채운다 — 교통비·출장비 산출의 출발지가 되는 값이라
-  // 증빙과 같은 서류에서 옮겨 적는 수고를 없앤다. 이미 주소가 있으면 덮어쓰지 않는다
-  // (사용자가 고쳐둔 값이 인식값에 밀리면 안 된다). 인식 실패는 오류가 아니다 — 직접 입력하면 된다.
+  // 첨부 PDF에서 자택주소를 인식한다 — 교통비·출장비 산출의 출발지가 되는 값이라
+  // 증빙과 같은 서류에서 옮겨 적는 수고를 없앤다. 인식 실패는 오류가 아니다(직접 입력하면 된다).
+  //
+  // 이미 주소가 있으면 **덮어쓰지 않되 인식은 한다** — 사용자가 고쳐둔 값이 인식값에 밀리면
+  // 안 되지만, 종전처럼 인식 자체를 건너뛰면 이사·오인식으로 주소가 어긋나 있어도
+  // 새 증빙을 붙인 사람에게 아무 신호가 없다(실제로 다른 사람 주소가 남아 산출이 틀렸다).
+  // 다르면 화면이 비교를 보여주고 교체 여부를 사용자가 고른다.
   let parsedAddress = ''
-  if (!member.home_address) {
-    const pdfs = files.filter(
-      (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'),
-    )
-    try {
-      for (const f of pdfs) {
-        const lines = await extractPdfLines(new Uint8Array(await f.arrayBuffer()))
-        parsedAddress = parseResidenceAddress(lines)
-        if (parsedAddress) break
-      }
-    } catch (e) {
-      console.error('Residence doc address parse error:', e)
+  const pdfs = files.filter(
+    (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'),
+  )
+  try {
+    for (const f of pdfs) {
+      const lines = await extractPdfLines(new Uint8Array(await f.arrayBuffer()))
+      parsedAddress = parseResidenceAddress(lines)
+      if (parsedAddress) break
     }
+  } catch (e) {
+    console.error('Residence doc address parse error:', e)
   }
+
+  const previousAddress = member.home_address ?? ''
+  const applied = !!parsedAddress && !previousAddress
 
   const { error } = await supabase
     .from('site_staff_members')
     .update({
       residence_doc_urls: [...(member.residence_doc_urls ?? []), ...newUrls],
-      ...(parsedAddress ? { home_address: parsedAddress } : {}),
+      ...(applied ? { home_address: parsedAddress } : {}),
     })
     .eq('id', memberId)
   if (error) return { error: '거주지 증빙 저장에 실패했습니다: ' + error.message }
@@ -364,7 +369,7 @@ export async function uploadResidenceDoc(memberId: string, formData: FormData) {
   revalidatePath('/attendance')
   revalidatePath('/expenses/staff-costs/resident')
   revalidatePath('/expenses/staff-costs/support')
-  return { success: true, parsedAddress }
+  return { success: true, parsedAddress, previousAddress, applied }
 }
 
 // 이미 첨부된 거주지 증빙에서 자택주소를 다시 인식한다.

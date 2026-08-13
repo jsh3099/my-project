@@ -93,27 +93,52 @@ export function AttendanceSheetSection({
         setError(res.error as string)
         return
       }
-      // 인식 결과 안내 — 자택주소가 채워졌으면 확인을 유도한다 (인식값은 제안)
-      const addr = (res as { parsedAddress?: string }).parsedAddress
-      setAddrNotice({
-        key: p.key,
-        text: addr
-          ? `${p.name} 자택주소를 증빙에서 인식했습니다: ${addr} — 교통비 산출에 자동 적용됩니다. 다르면 수정하세요.`
-          : `${p.name} 증빙은 첨부됐지만 자택주소를 읽지 못했습니다 (스캔 이미지이거나 형식이 다름). 주소를 직접 입력하세요.`,
-        ok: !!addr,
-      })
+      // 인식 결과 안내 — 인식값은 제안이다.
+      // 이미 주소가 있으면 서버가 덮어쓰지 않으므로, 값이 다르면 비교를 보여주고
+      // 교체 여부를 여기서 고르게 한다 (조용히 무시하면 옛 주소로 산출이 계속된다)
+      const { parsedAddress: addr, previousAddress, applied } =
+        res as { parsedAddress?: string; previousAddress?: string; applied?: boolean }
+      if (!addr) {
+        setAddrNotice({
+          key: p.key,
+          text: `${p.name} 증빙은 첨부됐지만 자택주소를 읽지 못했습니다 (스캔 이미지이거나 형식이 다름). 주소를 직접 입력하세요.`,
+          ok: false,
+        })
+      } else if (applied) {
+        setAddrNotice({
+          key: p.key,
+          text: `${p.name} 자택주소를 증빙에서 인식했습니다: ${addr} — 교통비 산출에 자동 적용됩니다. 다르면 수정하세요.`,
+          ok: true,
+        })
+      } else if (previousAddress && previousAddress !== addr) {
+        setAddrNotice({
+          key: p.key,
+          text: `${p.name} 증빙의 주소가 등록된 자택주소와 다릅니다. 등록: ${previousAddress} / 증빙: ${addr} — 교통비·출장비는 등록된 주소로 산출됩니다.`,
+          ok: false,
+          replace: addr,
+        })
+      } else {
+        setAddrNotice({
+          key: p.key,
+          text: `${p.name} 증빙의 주소가 등록된 자택주소와 같습니다: ${addr}`,
+          ok: true,
+        })
+      }
       router.refresh()
     })
   }
 
-  // 자택주소 인식 결과 안내 (인원별 1건)
-  const [addrNotice, setAddrNotice] = useState<{ key: string; text: string; ok: boolean } | null>(null)
+  // 자택주소 인식 결과 안내 (인원별 1건). replace가 있으면 "증빙 주소로 교체" 버튼을 함께 띄운다
+  const [addrNotice, setAddrNotice] = useState<{ key: string; text: string; ok: boolean; replace?: string } | null>(null)
   // 자택주소 직접 입력 — 열려 있는 인원 key와 편집 중 값
   const [addrEditKey, setAddrEditKey] = useState<string | null>(null)
   const [addrDraft, setAddrDraft] = useState('')
-  // 첨부된 증빙에서 주소 재인식 — 업로드 시점에 인식 기능이 없었거나 실패한 경우
+  // 첨부된 증빙에서 주소 재인식 — 업로드 시점에 인식 기능이 없었거나 실패한 경우,
+  // 그리고 이사·오인식으로 등록 주소가 증빙과 어긋났을 때의 정정 경로.
+  // 사용자가 명시적으로 누르는 동작이므로 등록 주소가 있어도 인식값으로 덮어쓴다.
   function handleAddrReparse(p: PersonRow) {
     setError(null)
+    const before = p.homeAddress
     startMemberTransition(async () => {
       const res = await reparseResidenceAddress(p.memberId)
       if (res && 'error' in res) {
@@ -123,10 +148,29 @@ export function AttendanceSheetSection({
       const addr = (res as { parsedAddress?: string }).parsedAddress
       setAddrNotice({
         key: p.key,
-        text: `${p.name} 자택주소를 증빙에서 인식했습니다: ${addr} — 교통비 산출에 자동 적용됩니다. 다르면 수정하세요.`,
+        text: before && before !== addr
+          ? `${p.name} 자택주소를 증빙 기준으로 바꿨습니다: ${before} → ${addr} — 교통비·출장비 산출에 반영됩니다.`
+          : `${p.name} 자택주소를 증빙에서 인식했습니다: ${addr} — 교통비 산출에 자동 적용됩니다. 다르면 수정하세요.`,
         ok: true,
       })
       router.refresh()
+    })
+  }
+
+  // 첨부 안내에서 "증빙 주소로 교체" — 등록 주소를 인식값으로 바꾼다
+  function handleAddrReplace(p: PersonRow, address: string) {
+    setAddrNotice(null)
+    startMemberTransition(async () => {
+      const res = await updateStaffHomeAddress(p.memberId, address)
+      if (res && 'error' in res) setError(res.error as string)
+      else {
+        setAddrNotice({
+          key: p.key,
+          text: `${p.name} 자택주소를 증빙 주소로 교체했습니다: ${address} — 교통비·출장비 산출에 반영됩니다.`,
+          ok: true,
+        })
+        router.refresh()
+      }
     })
   }
 
@@ -690,12 +734,16 @@ export function AttendanceSheetSection({
                     }`}>
                     🏠 {p.homeAddress ?? '자택주소 미입력'}
                   </button>
-                  {/* 첨부는 있는데 주소가 비었을 때 — 업로드 시점에 인식하지 못한 증빙을 다시 읽는다 */}
-                  {!p.homeAddress && p.residenceDocUrls.length > 0 && (
+                  {/* 첨부가 있으면 주소가 이미 있어도 재인식할 수 있어야 한다 —
+                      이사·오인식으로 등록 주소가 어긋나면 정정 경로가 이것뿐이다
+                      (업로드는 기존 주소를 덮어쓰지 않는다) */}
+                  {p.residenceDocUrls.length > 0 && (
                     <button type="button" onClick={() => handleAddrReparse(p)} disabled={isMemberPending}
-                      title="첨부된 증빙에서 자택주소를 다시 인식합니다"
+                      title={p.homeAddress
+                        ? '첨부된 증빙에서 자택주소를 다시 읽어 등록 주소를 바꿉니다 (이사·오인식 정정)'
+                        : '첨부된 증빙에서 자택주소를 인식합니다'}
                       className="flex-none whitespace-nowrap rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-50">
-                      {isMemberPending ? '…' : '주소 인식'}
+                      {isMemberPending ? '…' : p.homeAddress ? '주소 재인식' : '주소 인식'}
                     </button>
                   )}
                 </span>
@@ -799,6 +847,13 @@ export function AttendanceSheetSection({
                 addrNotice.ok ? 'border-blue-100 bg-blue-50 text-blue-700' : 'border-amber-100 bg-amber-50 text-amber-700'
               }`}>
                 <span>{addrNotice.ok ? '🏠' : '⚠'} {addrNotice.text}</span>
+                {/* 증빙 주소가 등록 주소와 다를 때 — 한 번에 교체할 수 있게 (조용히 무시되면 옛 주소로 산출된다) */}
+                {addrNotice.replace && (
+                  <button type="button" onClick={() => handleAddrReplace(p, addrNotice.replace!)} disabled={isMemberPending}
+                    className="rounded-lg bg-amber-600 px-2 py-0.5 font-semibold text-white hover:bg-amber-700 disabled:opacity-50">
+                    증빙 주소로 교체
+                  </button>
+                )}
                 <button type="button" onClick={() => { setAddrEditKey(p.key); setAddrDraft(p.homeAddress ?? ''); setAddrNotice(null) }}
                   className="font-bold underline hover:no-underline">주소 수정</button>
                 <button type="button" onClick={() => setAddrNotice(null)}
