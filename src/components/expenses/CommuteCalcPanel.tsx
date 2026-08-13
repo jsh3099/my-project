@@ -30,6 +30,15 @@ interface Props {
   /** 근무기간 — 유가 기준일을 비워두면 이 기간의 오피넷 평균가를 적용한다 (A안) */
   periodStart?: string | null
   periodEnd?: string | null
+  /** 이미 산출·저장된 값 — 없으면 빈칸으로 시작한다.
+   *  이게 없으면 패널을 열 때마다 거리·유가·통행료가 공란이라 매번 재조회하게 된다. */
+  initial?: {
+    distanceOnewayKm?: number
+    fuelType?: string | null
+    fuelPrice?: number
+    fuelPriceDate?: string | null
+    tollRoundtrip?: number
+  } | null
   onApply: (params: CommuteApplyParams) => void
 }
 
@@ -37,7 +46,7 @@ function formatKRW(n: number) {
   return n.toLocaleString('ko-KR') + '원'
 }
 
-export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAddress, defaultFuelType, periodStart, periodEnd, onApply }: Props) {
+export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAddress, defaultFuelType, periodStart, periodEnd, initial, onApply }: Props) {
   const router = useRouter()
   const [homeAddress, setHomeAddress] = useState(defaultHomeAddress ?? '')
   // 현장주소 — 현장 등록 정보(sites.address)가 기본값이고, 여기서 고쳐 저장하면 다음부터 자동 입력
@@ -46,13 +55,22 @@ export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAdd
   // 고속도로 우선(시간 우선 경로) — 추천 경로가 무료도로면 통행료가 0으로 나오므로,
   // 실제로 고속도로로 다니는 인원은 이 옵션으로 거리·통행료를 산출한다
   const [highwayFirst, setHighwayFirst] = useState(true)
-  const [fuelType, setFuelType] = useState<VehicleFuelType>((defaultFuelType as VehicleFuelType) ?? 'gasoline')
-  const [fuelPrice, setFuelPrice] = useState('')
-  const [fuelPriceDate, setFuelPriceDate] = useState('')
+  // 이미 산출·저장된 값이 있으면 그대로 이어서 본다 — 수정할 것만 고치고 다시 적용하면 된다
+  const [fuelType, setFuelType] = useState<VehicleFuelType>(
+    (initial?.fuelType as VehicleFuelType) ?? (defaultFuelType as VehicleFuelType) ?? 'gasoline',
+  )
+  const [fuelPrice, setFuelPrice] = useState(
+    initial?.fuelPrice && initial.fuelPrice > 0 ? initial.fuelPrice.toLocaleString('ko-KR') : '',
+  )
+  const [fuelPriceDate, setFuelPriceDate] = useState(initial?.fuelPriceDate ?? '')
   // 유가 산정 근거 안내 — 기간 평균으로 채웠을 때 표본을 보여준다
   const [fuelBasis, setFuelBasis] = useState('')
-  const [distanceOneway, setDistanceOneway] = useState('') // 편도 km — 수동입력 or 경로조회로 채움
-  const [toll, setToll] = useState('') // 왕복 통행료
+  const [distanceOneway, setDistanceOneway] = useState(
+    initial?.distanceOnewayKm && initial.distanceOnewayKm > 0 ? String(initial.distanceOnewayKm) : '',
+  ) // 편도 km — 수동입력 or 경로조회로 채움
+  const [toll, setToll] = useState(
+    initial?.tollRoundtrip && initial.tollRoundtrip > 0 ? initial.tollRoundtrip.toLocaleString('ko-KR') : '',
+  ) // 왕복 통행료
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
   const [saved, setSaved] = useState(false)

@@ -188,6 +188,51 @@ export function AttendanceSheetSection({
     ])),
   )
 
+  // ── 첨부 제거 ──
+  // 제거는 저장 시 반영된다. 칩을 즉시 지우면 "이미 삭제됐다"고 읽혀 저장을 누르지 않게 되고,
+  // 화면을 떠났다 오면 첨부가 조용히 되살아난다 — 그래서 취소선으로 남겨 저장 전임을 보인다.
+  // 마지막 증빙이 사라지면 일수도 함께 비운다: 출근부 스캔이 일수의 유일한 근거라
+  // 근거만 빠진 일수가 식대·교통비 산출로 흘러가면 안 된다. 되돌리면 값도 함께 돌아온다.
+  const [clearedSnapshot, setClearedSnapshot] = useState<{
+    workDays: Record<string, string>
+    visitDates: Record<string, string[]>
+    source: Record<string, ValueSource>
+  } | null>(null)
+  const [removalNotice, setRemovalNotice] = useState<string | null>(null)
+
+  function removeAttachment(url: string) {
+    const nextRemoved = new Set(removedUrls).add(url)
+    setRemovedUrls(nextRemoved)
+    // 남은 증빙이 있으면 일수는 그대로 (여러 부 중 한 장만 교체하는 흐름)
+    if (sheetFileUrls.some((u) => !nextRemoved.has(u)) || pickedNames.length > 0) return
+    const hasValue = isSupport
+      ? persons.some((p) => (visitDates[p.key] ?? []).length > 0)
+      : persons.some((p) => (parseInt(workDays[p.key] ?? '0', 10) || 0) > 0)
+    if (!hasValue) return
+    setClearedSnapshot({ workDays, visitDates, source })
+    setWorkDays(Object.fromEntries(persons.map((p) => [p.key, '0'])))
+    setVisitDates(Object.fromEntries(persons.map((p) => [p.key, []])))
+    setSource(Object.fromEntries(persons.map((p) => [p.key, 'empty' as ValueSource])))
+    setRemovalNotice(
+      `출근부 증빙을 모두 제거해 ${isSupport ? '방문일' : '출근일수'}도 함께 비웠습니다 — 근거 없는 일수가 정산에 남지 않게 합니다. 저장해야 반영되며, [되돌리기]로 첨부와 값을 함께 복구할 수 있습니다.`,
+    )
+  }
+
+  function restoreAttachment(url: string) {
+    setRemovedUrls((prev) => {
+      const next = new Set(prev)
+      next.delete(url)
+      return next
+    })
+    if (clearedSnapshot) {
+      setWorkDays(clearedSnapshot.workDays)
+      setVisitDates(clearedSnapshot.visitDates)
+      setSource(clearedSnapshot.source)
+      setClearedSnapshot(null)
+    }
+    setRemovalNotice(null)
+  }
+
   // 자동 인식 결과 — 배너·월별 근거 시트용으로 원본(월별 분해)을 남긴다
   const [isParsing, startParseTransition] = useTransition()
   const [parseNotice, setParseNotice] = useState<{ kind: 'ok' | 'warn'; text: string } | null>(null)
@@ -230,6 +275,7 @@ export function AttendanceSheetSection({
     const files = Array.from(e.target.files ?? []).filter((f) => f.size > 0)
     setPickedNames(files.map((f) => f.name))
     setParseNotice(null)
+    setRemovalNotice(null) // 새 증빙을 올리면 "일수를 비웠다"는 안내는 더 이상 맞지 않는다
     if (files.length === 0 || persons.length === 0) return
     const pdf = files.find((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'))
     if (!pdf) {
@@ -467,22 +513,42 @@ export function AttendanceSheetSection({
       {/* 첨부 스트립 — 현장 작성·서명 출근부 스캔, 기성기간 전체 1부 (원본 증빙) */}
       <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 bg-gray-50/60 px-5 py-2.5">
         <span className="text-xs font-semibold text-gray-500">붙임: 출근부</span>
-        {keptUrls.map((url) => (
-          <span key={url} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs">
-            <input type="hidden" name="kept_file_urls" value={url} />
-            <span className={`h-2 w-2 rounded-sm ${isSupport ? 'bg-teal-500' : 'bg-purple-500'}`} aria-hidden="true" />
-            <a href={receiptHref(url)} target="_blank" rel="noreferrer" title={receiptFileName(url)}
-              className="max-w-[220px] truncate text-blue-600 hover:underline">
-              {receiptFileName(url)}
-            </a>
-            <button
-              type="button"
-              onClick={() => setRemovedUrls((prev) => new Set(prev).add(url))}
-              className="text-gray-300 hover:text-red-500"
-              aria-label="첨부 제거"
-            >✕</button>
-          </span>
-        ))}
+        {/* 제거한 첨부도 취소선으로 남긴다 — 저장 전이라는 것과 되돌릴 수 있다는 것을 같은 자리에서 보인다 */}
+        {sheetFileUrls.map((url) => {
+          const isRemoved = removedUrls.has(url)
+          return (
+            <span key={url} className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs ${
+              isRemoved ? 'border-dashed border-red-200 bg-red-50/70' : 'border-gray-200 bg-white'
+            }`}>
+              {!isRemoved && <input type="hidden" name="kept_file_urls" value={url} />}
+              <span className={`h-2 w-2 rounded-sm ${
+                isRemoved ? 'bg-red-300' : isSupport ? 'bg-teal-500' : 'bg-purple-500'
+              }`} aria-hidden="true" />
+              <a href={receiptHref(url)} target="_blank" rel="noreferrer" title={receiptFileName(url)}
+                className={`max-w-[220px] truncate hover:underline ${
+                  isRemoved ? 'text-red-400 line-through' : 'text-blue-600'
+                }`}>
+                {receiptFileName(url)}
+              </a>
+              {isRemoved ? (
+                <>
+                  <span className="whitespace-nowrap text-[10px] font-semibold text-red-500">(저장 시 삭제)</span>
+                  <button type="button" onClick={() => restoreAttachment(url)}
+                    className="whitespace-nowrap rounded px-1 text-[10px] font-semibold text-gray-500 hover:bg-white hover:text-blue-600">
+                    되돌리기
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(url)}
+                  className="text-gray-300 hover:text-red-500"
+                  aria-label="첨부 제거"
+                >✕</button>
+              )}
+            </span>
+          )
+        })}
         {pickedNames.map((name) => (
           <span key={name} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-gray-300 bg-white px-2 py-1 text-xs text-gray-600">
             <span className={`h-2 w-2 rounded-sm ${isSupport ? 'bg-teal-300' : 'bg-purple-300'}`} aria-hidden="true" />
@@ -521,6 +587,15 @@ export function AttendanceSheetSection({
             <button type="button" onClick={() => setSheetPersonKey(Object.keys(parsedByMonth)[0])}
               className="font-bold underline hover:no-underline">월별 인식 근거</button>
           )}
+        </div>
+      )}
+
+      {/* 증빙 제거 안내 — 일수가 함께 비워졌다는 사실은 저장 전에 반드시 보여야 한다 */}
+      {removalNotice && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-red-100 bg-red-50 px-5 py-2 text-xs text-red-700">
+          <span>⚠ {removalNotice}</span>
+          <button type="button" onClick={() => setRemovalNotice(null)}
+            className="ml-auto text-red-300 hover:text-red-600" aria-label="안내 닫기">✕</button>
         </div>
       )}
 

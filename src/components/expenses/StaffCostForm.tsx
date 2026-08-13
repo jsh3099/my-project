@@ -7,6 +7,7 @@ import {
   attachStaffCostReceipt,
   detachStaffCostReceipt,
   saveStaffCostItem,
+  reparseStaffCostReceipts,
   type StaffCostRow,
   type StaffCostCommuteCalc,
   type StaffCostItemTarget,
@@ -69,13 +70,24 @@ function NumInput({ value, onChange, disabled, readOnly }: { value: string; onCh
   )
 }
 
-const RECEIPT_CATEGORIES = ['숙소임대비', '관리비', '식비', '교통비'] as const
+// 정산서가 실제로 쓰는 첨부만 받는다.
+//  숙소임대비·관리비 → 1-1 붙임(숙소계약서·이체확인증·관리비 사용내역)
+//  교통비 경로캡처   → 1-3 교통비 산출서에 임베드되는 지도 캡처 이미지(collectCalcSheetImages).
+//                     유가·거리·통행료는 시스템이 계산하므로 영수증이 아니라 캡처가 온다.
+// 식대는 출근부 일수 × 단가 자동 계산이고 1-2의 붙임은 '출근부 1부'뿐이라, 식비 영수증은
+// 정산서 어디에도 쓰이지 않는다 — 칸을 두면 쓰이지 않을 증빙을 모으게 되어 뺐다.
+const RECEIPT_CATEGORIES = ['숙소임대비', '관리비', '교통비 경로캡처'] as const
 type ReceiptCategory = typeof RECEIPT_CATEGORIES[number]
 const CATEGORY_COLORS: Record<ReceiptCategory, string> = {
-  '숙소임대비': 'bg-purple-100 text-purple-700',
-  '관리비':    'bg-orange-100 text-orange-700',
-  '식비':      'bg-green-100 text-green-700',
-  '교통비':    'bg-blue-100 text-blue-700',
+  '숙소임대비':      'bg-purple-100 text-purple-700',
+  '관리비':          'bg-orange-100 text-orange-700',
+  '교통비 경로캡처': 'bg-blue-100 text-blue-700',
+}
+// 칩 아래 한 줄 설명 — 무엇을 붙이는 자리인지 이름만으로는 안 보인다
+const CATEGORY_HINTS: Record<ReceiptCategory, string> = {
+  '숙소임대비':      '이체확인증·숙소계약서 (PDF는 금액 자동 인식)',
+  '관리비':          '전기·가스 납입확인서 (PDF는 건별 자동 인식)',
+  '교통비 경로캡처': '지도 경로 캡처 이미지 — 교통비 산출서에 실립니다',
 }
 
 // 파일명에서 비목 자동 인식 (일괄 업로드 자동 분류) — 관리비 키워드를 먼저 본다
@@ -83,17 +95,17 @@ const CATEGORY_COLORS: Record<ReceiptCategory, string> = {
 function detectCategory(filename: string): ReceiptCategory | null {
   if (/관리비|전기|가스|납입확인/.test(filename)) return '관리비'
   if (/숙소|임대|월세|이체확인/.test(filename)) return '숙소임대비'
-  if (/식비|식대/.test(filename)) return '식비'
-  if (/유류|주유|통행료|하이패스|교통/.test(filename)) return '교통비'
+  if (/경로|지도|캡처|통행료|하이패스|교통/.test(filename)) return '교통비 경로캡처'
   return null
 }
 // 영수증 비목 라벨 → expenses.subcategory 값 매핑 (서버 액션에 전달할 때 사용)
 const CATEGORY_TO_SUBCATEGORY: Record<ReceiptCategory, string> = {
-  '숙소임대비': 'lodging_rent',
-  '관리비':    'lodging_maintenance',
-  '식비':      'meal',
-  '교통비':    'commute',
+  '숙소임대비':      'lodging_rent',
+  '관리비':          'lodging_maintenance',
+  '교통비 경로캡처': 'commute',
 }
+// 자가 출퇴근자는 숙소비 비대상 — 서버(attachStaffCostReceipt)도 같은 기준으로 막는다
+const LODGING_CATEGORIES: ReceiptCategory[] = ['숙소임대비', '관리비']
 
 // 이미 저장된 draft 주재비 — 서버에서 복원해 폼 초기값으로 쓴다
 export type StaffCostDraftItem = {
@@ -187,17 +199,32 @@ let extraIdSeq = 0
 // ── 영수증 패널 ─────────────────────────────────────────────
 // 첨부는 드롭하는 즉시 업로드된다 (금액은 확인 후 별도 저장) — 스캔 파일을 다시 구하는 비용이
 // 크고, 브라우저 메모리에만 두면 새로고침 한 번에 사라지기 때문.
-function ReceiptPanel({ savedByCategory, onAdd, onRemoveSaved, uploading, maxFiles, notice }: {
+function ReceiptPanel({ savedByCategory, onAdd, onRemoveSaved, uploading, maxFiles, notice, onDone, maintPendingCount, rentPendingAmount, saving, onReparse, reparsing, disabledCategories, disabledReason }: {
   savedByCategory: Record<string, string[]>
   onAdd: (files: File[], category: ReceiptCategory) => void
   onRemoveSaved: (category: ReceiptCategory, url: string) => void
   uploading: boolean
   maxFiles: number
   notice?: { kind: 'ok' | 'warn'; text: string } | null
+  /** 확인을 마치고 주재비 화면으로 — 인식된 관리비 건별 내역이 있으면 함께 저장한다 */
+  onDone: () => void
+  /** 자동 인식으로 표에 채워진 관리비 건수 (0이면 저장할 것이 없어 닫기만 한다) */
+  maintPendingCount: number
+  /** 인식·입력된 숙소임대비 금액 — 0보다 크면 완료 버튼이 함께 저장한다 */
+  rentPendingAmount: number
+  saving: boolean
+  /** 이미 저장된 PDF 첨부를 다시 읽어 금액을 채운다 */
+  onReparse: () => void
+  reparsing: boolean
+  /** 이 사람에게 해당 없는 비목 (자가 출퇴근자의 숙소임대비·관리비) */
+  disabledCategories: ReceiptCategory[]
+  disabledReason: string
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<ReceiptCategory>('숙소임대비')
+  const enabled = RECEIPT_CATEGORIES.filter((c) => !disabledCategories.includes(c))
+  // 해당 없는 비목이 처음부터 선택돼 있으면 붙일 수 없는 곳에 끌어다 놓게 된다
+  const [selectedCategory, setSelectedCategory] = useState<ReceiptCategory>(enabled[0] ?? RECEIPT_CATEGORIES[0])
 
   // 저장된 첨부를 비목별로 펼쳐 화면 표시용 목록으로 만든다
   const saved = RECEIPT_CATEGORIES.flatMap((cat) =>
@@ -211,8 +238,11 @@ function ReceiptPanel({ savedByCategory, onAdd, onRemoveSaved, uploading, maxFil
     for (const f of Array.from(incoming)) {
       if (valid.length >= room) break
       if (f.size > MAX_SIZE) { alert(`${f.name}: 파일 크기는 10MB 이하만 가능합니다.`); continue }
-      // 파일명에서 비목이 읽히면 그것을, 아니면 위에서 선택한 비목을 쓴다
-      valid.push({ file: f, category: detectCategory(f.name) ?? selectedCategory })
+      // 파일명에서 비목이 읽히면 그것을, 아니면 위에서 선택한 비목을 쓴다.
+      // 이 사람에게 해당 없는 비목으로 읽혔으면 무시하고 선택한 비목에 붙인다
+      const detected = detectCategory(f.name)
+      const category = detected && !disabledCategories.includes(detected) ? detected : selectedCategory
+      valid.push({ file: f, category })
     }
     // 비목별로 묶어 한 번씩 업로드
     for (const cat of RECEIPT_CATEGORIES) {
@@ -225,23 +255,38 @@ function ReceiptPanel({ savedByCategory, onAdd, onRemoveSaved, uploading, maxFil
     <div className="border-t border-blue-100 bg-blue-50/40 px-4 py-3 space-y-2.5">
       <div className="flex items-center gap-2">
         <span className="text-xs font-semibold text-gray-600 whitespace-nowrap">비목 선택</span>
-        <div className="flex gap-1.5">
-          {RECEIPT_CATEGORIES.map((cat) => (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => setSelectedCategory(cat)}
-              className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
-                selectedCategory === cat
-                  ? CATEGORY_COLORS[cat] + ' ring-2 ring-offset-1 ring-current'
-                  : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-400'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
+        <div className="flex flex-wrap gap-1.5">
+          {RECEIPT_CATEGORIES.map((cat) => {
+            const off = disabledCategories.includes(cat)
+            return (
+              <button
+                key={cat}
+                type="button"
+                disabled={off}
+                title={off ? disabledReason : CATEGORY_HINTS[cat]}
+                onClick={() => setSelectedCategory(cat)}
+                className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                  off
+                    ? 'cursor-not-allowed border border-gray-200 bg-gray-100 text-gray-300 line-through'
+                    : selectedCategory === cat
+                      ? CATEGORY_COLORS[cat] + ' ring-2 ring-offset-1 ring-current'
+                      : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-400'
+                }`}
+              >
+                {cat}
+              </button>
+            )
+          })}
         </div>
       </div>
+
+      {/* 이름만으로는 무엇을 붙이는 자리인지 안 보인다 — 선택한 비목의 설명을 한 줄로 */}
+      <p className="text-xs text-gray-500">
+        {disabledCategories.length > 0 && (
+          <span className="mr-1 font-semibold text-amber-700">{disabledReason} —</span>
+        )}
+        {CATEGORY_HINTS[selectedCategory]}
+      </p>
 
       {saved.length < maxFiles && (
         <div
@@ -287,6 +332,37 @@ function ReceiptPanel({ savedByCategory, onAdd, onRemoveSaved, uploading, maxFil
         </p>
       )}
       <p className="text-xs text-gray-400">첨부는 올리는 즉시 저장됩니다 · 최대 {maxFiles}개 · JPG·PNG·PDF · 10MB 이하 · 파일명에 항목(숙소비·관리비 등)이 있으면 자동 분류 · 이체확인증·관리비 PDF는 금액 자동 인식</p>
+
+      {/* 첨부만 하고 이 패널을 닫는 방법이 우측 상단 ✕뿐이라 "다음에 뭘 해야 하나"가 끊겼다.
+          인식된 금액(숙소임대비·관리비)은 여기서 바로 확정하고 주재비 화면으로 돌려보낸다.
+          [전체 임시저장]까지 미루면 그 사이 화면을 벗어났을 때 0원으로 되돌아간 채 저장된다. */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-blue-100 pt-2.5">
+        {/* 자동 인식은 업로드 직후 한 번만 돌아간다 — 저장 전에 화면을 벗어나면 첨부만 남고
+            금액이 사라져서, 첨부를 지웠다 다시 올리는 것 말고는 되살릴 방법이 없었다 */}
+        {saved.some(({ url }) => url.split('#')[0].toLowerCase().endsWith('.pdf')) && (
+          <button type="button" onClick={onReparse} disabled={uploading || reparsing || saving}
+            title="이미 첨부된 PDF를 다시 읽어 숙소임대비·관리비 금액을 채웁니다"
+            className="whitespace-nowrap rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:opacity-50">
+            {reparsing ? '인식 중…' : '🔍 금액 재인식'}
+          </button>
+        )}
+        {(maintPendingCount > 0 || rentPendingAmount > 0) && (
+          <span className="text-xs text-gray-500">
+            {[
+              rentPendingAmount > 0 ? `숙소임대비 ${rentPendingAmount.toLocaleString('ko-KR')}원` : null,
+              maintPendingCount > 0 ? `관리비 ${maintPendingCount}건` : null,
+            ].filter(Boolean).join(' · ')}이 채워졌습니다
+          </span>
+        )}
+        <button type="button" onClick={onDone} disabled={uploading || saving}
+          className="ml-auto whitespace-nowrap rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+          {saving
+            ? '저장 중...'
+            : maintPendingCount > 0 || rentPendingAmount > 0
+              ? '금액 저장하고 주재비 화면으로'
+              : '주재비 화면으로 돌아가기'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -387,11 +463,13 @@ function MaintenancePanel({ items, onChange, onSave, saveState }: {
 }
 
 // ── 숙소임대비 패널 (월세 / 전세 환산) ──────────────────────────
-function LodgingPanel({ r, onChange, onSave, saveState }: {
+// 저장 버튼을 두지 않는다: 월세일 때 금액은 이 패널이 아니라 표의 칸에 있어서
+// "숙소임대비 저장"이 화면에 보이지도 않는 값을 저장하는 버튼이 됐다
+// (금액 0원인 채로 눌러 0원짜리 항목이 만들어지는 것도 막히지 않았다).
+// 선택은 표에 즉시 반영되고, 확정은 하단 [전체 임시저장] 한 곳에서만 한다.
+function LodgingPanel({ r, onChange }: {
   r: Row
   onChange: (patch: Partial<Row>) => void
-  onSave: () => void
-  saveState?: 'saving' | 'saved'
 }) {
   const converted = convertJeonseToMonthly(parseNum(r.deposit), parseFloat(r.conversionRate) || 0)
   return (
@@ -428,9 +506,15 @@ function LodgingPanel({ r, onChange, onSave, saveState }: {
         </div>
       )}
       {r.lodgingContract === 'monthly' && (
-        <p className="text-xs text-gray-500">월세 금액을 표의 숙소임대비 칸에 직접 입력하세요.</p>
+        // 이 패널에 첨부 버튼이 없어 "첨부할 곳이 없다"고 읽혔다 — 어디서 붙이는지 여기서 알려준다
+        <p className="text-xs text-gray-500">
+          월세 금액을 표의 숙소임대비 칸에 직접 입력하세요. 이체확인증(PDF)을 행 아래
+          <b className="text-amber-700"> 📎 영수증 첨부</b>로 올리면 기성기간 이체금액을 합산해 자동으로 채웁니다.
+        </p>
       )}
-      <ItemSaveButton label="숙소임대비 저장" onSave={onSave} saveState={saveState} tone="purple" />
+      <p className="border-t border-purple-100 pt-2 text-[11px] text-gray-400">
+        선택은 표에 바로 반영됩니다 — 저장은 화면 맨 아래 <b className="text-gray-500">[전체 임시저장]</b>에서 한 번에 합니다.
+      </p>
     </div>
   )
 }
@@ -615,6 +699,8 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
 
   // 업로드 진행 중인 행
   const [uploadingRows, setUploadingRows] = useState<Set<string>>(new Set())
+  // 저장된 첨부를 다시 읽는 중인 행
+  const [reparsingRows, setReparsingRows] = useState<Set<string>>(new Set())
   // 비목 단위 저장 상태: `${rowId}::${subcategory}` → 'saving' | 'saved'
   const [itemSaveState, setItemSaveState] = useState<Record<string, 'saving' | 'saved'>>({})
 
@@ -683,7 +769,11 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
     })
   }
 
-  // (C) 비목 1건 저장 — 자동 인식값을 확인한 뒤 이 비목만 확정한다
+  // (C) 비목 1건 저장 — 자동 인식값을 확인한 뒤 그 비목만 확정한다.
+  // 숙소임대비 인식값은 폼에만 있어서, [전체 임시저장]까지 가기 전에 화면을 벗어나면
+  // 0원으로 되돌아간 상태로 저장되는 사고가 실제로 났다(2026-08-13, 성혁기 0원 확정).
+  // 그래서 영수증 패널의 완료 버튼이 인식된 금액(임대비·관리비)을 그 자리에서 저장한다.
+  // 단, 임대비 0원은 저장하지 않는다 — 유령 행 방지(계약형태 패널의 옛 저장 버튼이 낸 사고).
   function saveItem(id: string, isExtra: boolean, subcategory: 'lodging_rent' | 'lodging_maintenance') {
     const r = getRow(id, isExtra)
     const target = itemTarget(id, isExtra, subcategory)
@@ -693,6 +783,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
     fd.append('target', JSON.stringify(target))
     if (subcategory === 'lodging_rent') {
       const d = deriveRow(r, mealDailyLimit)
+      if (d.lodgingRent <= 0) return
       fd.append('amount', String(d.lodgingRent))
       fd.append('lodging_calc_detail', JSON.stringify(
         r.lodgingContract === 'jeonse'
@@ -719,25 +810,25 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
     })
   }
 
-  // 첨부 PDF에서 숙소임대비(이체금액 합산)·관리비(전기·가스 건별)를 읽어 해당 칸을 채운다.
-  // 인식값은 제안 — 사용자가 확인·수정 후 저장으로 확정한다.
-  function autoFillFromReceipts(id: string, added: File[]) {
+  // 인식 결과를 행에 반영한다 — 업로드 직후(autoFillFromReceipts)와
+  // 저장된 첨부 재인식(reparseRowReceipts)이 같은 규칙을 쓰도록 한 곳에 둔다.
+  function applyParsedAmounts(
+    id: string,
+    result: { rentTotal: number; maintItems: { date: string; tag: string; amountGross: number }[] },
+  ) {
     const isExtra = id.startsWith('extra_')
-    const fd = new FormData()
-    for (const f of added) fd.append('files', f)
-    startReceiptTransition(async () => {
-      const result = await parseReceiptAmounts(fd)
-      if ('error' in result) {
-        setReceiptNotice((p) => ({ ...p, [id]: { kind: 'warn', text: result.error } }))
-        return
-      }
+    {
       const filled: string[] = []
+      // 인식된 비목마다 확정 경로가 다르다 — 관리비는 영수증 패널 버튼, 숙소임대비는 전체 임시저장
+      let filledMaint = false
+      let filledRent = false
       if (result.rentTotal > 0) {
         patchRow(id, isExtra, {
           lodgingContract: 'monthly',
           lodgingRent: result.rentTotal.toLocaleString('ko-KR'),
         })
         filled.push(`숙소임대비 ${result.rentTotal.toLocaleString('ko-KR')}원`)
+        filledRent = true
       }
       if (result.maintItems.length > 0) {
         const existing = getRow(id, isExtra)?.maintItems ?? []
@@ -748,15 +839,59 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
           patchRow(id, isExtra, { maintItems: [...existing, ...newItems] })
           const gross = result.maintItems.reduce((s, it) => s + it.amountGross, 0)
           filled.push(`관리비 ${newItems.length}건 (합계 ${gross.toLocaleString('ko-KR')}원, VAT 제외 후 인정)`)
+          filledMaint = true
         }
       }
+      // 인식값은 아래 완료 버튼이 임대비·관리비 모두 그 자리에서 저장한다
+      const tail = filledMaint || filledRent
+        ? ' — 값을 확인한 뒤 아래 [금액 저장하고 주재비 화면으로]를 누르세요.'
+        : ''
       setReceiptNotice((p) => ({
         ...p,
         [id]:
           filled.length > 0
-            ? { kind: 'ok', text: `영수증에서 자동 인식: ${filled.join(' · ')} — 값을 확인하고 해당 비목의 저장 버튼을 누르세요.` }
+            ? { kind: 'ok', text: `영수증에서 자동 인식: ${filled.join(' · ')}${tail}` }
             : { kind: 'warn', text: '첨부에서 금액을 찾지 못했습니다. 직접 입력하세요.' },
       }))
+    }
+  }
+
+  // 첨부 PDF에서 숙소임대비(이체금액 합산)·관리비(전기·가스 건별)를 읽어 해당 칸을 채운다.
+  // 인식값은 제안 — 사용자가 확인·수정 후 저장으로 확정한다.
+  function autoFillFromReceipts(id: string, added: File[]) {
+    const fd = new FormData()
+    for (const f of added) fd.append('files', f)
+    startReceiptTransition(async () => {
+      const result = await parseReceiptAmounts(fd)
+      if ('error' in result) {
+        setReceiptNotice((p) => ({ ...p, [id]: { kind: 'warn', text: result.error } }))
+        return
+      }
+      applyParsedAmounts(id, result)
+    })
+  }
+
+  // 이미 저장된 첨부를 다시 읽어 금액을 채운다 — 인식값을 저장하기 전에 화면을 벗어나면
+  // 첨부만 남고 금액이 사라지는데, 그때 첨부를 지웠다 다시 올리지 않아도 되게 한다.
+  function reparseRowReceipts(id: string) {
+    const isExtra = id.startsWith('extra_')
+    // 조회는 사람(현장·연월·성명) 기준이라 비목은 무엇을 넘겨도 같은 결과다
+    const target = itemTarget(id, isExtra, 'lodging_rent')
+    if (!target) {
+      setReceiptNotice((p) => ({ ...p, [id]: { kind: 'warn', text: '성명을 먼저 입력하세요.' } }))
+      return
+    }
+    const fd = new FormData()
+    fd.append('target', JSON.stringify(target))
+    setReparsingRows((p) => new Set(p).add(id))
+    startReceiptTransition(async () => {
+      const result = await reparseStaffCostReceipts(fd)
+      setReparsingRows((p) => { const n = new Set(p); n.delete(id); return n })
+      if ('error' in result) {
+        setReceiptNotice((p) => ({ ...p, [id]: { kind: 'warn', text: result.error } }))
+        return
+      }
+      applyParsedAmounts(id, result)
     })
   }
 
@@ -909,8 +1044,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
   const CATEGORY_DOT: Record<ReceiptCategory, string> = {
     '숙소임대비': 'bg-purple-400',
     '관리비': 'bg-orange-400',
-    '식비': 'bg-green-400',
-    '교통비': 'bg-blue-400',
+    '교통비 경로캡처': 'bg-blue-400',
   }
 
   // ── 인원 카드 (카드 1장 = 사람 1명) ──────────────────────────
@@ -1097,7 +1231,10 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
 
             {/* 증빙 스트립 — 사람 단위로 붙어 "누구 증빙이 빠졌나"가 보인다 */}
             <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 bg-gray-50/60 px-4 py-2.5">
-              <span className="text-xs font-semibold text-gray-500">증빙 {savedList.length}</span>
+              {/* 증빙이 없는 행은 라벨부터 눈에 띄어야 한다 — 스트립의 목적이 "누구 증빙이 빠졌나" */}
+              <span className={`text-xs font-semibold ${savedList.length === 0 ? 'text-amber-700' : 'text-gray-500'}`}>
+                증빙 {savedList.length}
+              </span>
               {savedList.map(({ cat, url }) => (
                 <span key={url} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs shadow-sm">
                   <span className={`h-2 w-2 rounded-sm ${CATEGORY_DOT[cat]}`} />
@@ -1109,9 +1246,17 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                     className="text-gray-300 hover:text-red-500">✕</button>
                 </span>
               ))}
+              {/* 숙소임대비·관리비 증빙이 모두 이 버튼으로 들어온다 — 회색 점선이라 첨부 자리로 읽히지 않았다.
+                  출근부 화면의 '거주지 증빙 첨부'와 같은 규칙: 없으면 주황(누락), 있으면 파랑(추가) */}
               <button type="button" onClick={() => setSheet({ id, isExtra, panel: 'receipt' })}
-                className="rounded-lg border border-dashed border-gray-300 px-2.5 py-1 text-xs text-gray-500 hover:border-blue-400 hover:text-blue-600">
-                + 영수증 추가 (자동 인식)
+                title="숙소임대비 이체확인증·관리비 납입확인서·식비·교통비 영수증 — PDF는 금액이 자동 인식됩니다"
+                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                  savedList.length === 0
+                    ? 'border border-dashed border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-500 hover:bg-amber-100'
+                    : 'border border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
+                }`}>
+                <span aria-hidden="true">📎</span>
+                {savedList.length === 0 ? '영수증 첨부 (자동 인식)' : '영수증 추가 (자동 인식)'}
               </button>
               {uploadingRows.has(id) && <span className="text-xs text-blue-600">⏳ 업로드 중…</span>}
               {notice && (
@@ -1224,6 +1369,27 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                   uploading={uploadingRows.has(sheet.id)}
                   maxFiles={maxFiles}
                   notice={receiptNotice[sheet.id]}
+                  maintPendingCount={sheetRow.maintItems.filter((it) => parseNum(it.amountGross) > 0).length}
+                  rentPendingAmount={sheetRow.commuteMode === 'daily_commute' ? 0 : deriveRow(sheetRow, mealDailyLimit).lodgingRent}
+                  saving={
+                    itemSaveState[`${sheet.id}::lodging_maintenance`] === 'saving' ||
+                    itemSaveState[`${sheet.id}::lodging_rent`] === 'saving'
+                  }
+                  onReparse={() => reparseRowReceipts(sheet.id)}
+                  reparsing={reparsingRows.has(sheet.id)}
+                  disabledCategories={sheetRow.commuteMode === 'daily_commute' ? LODGING_CATEGORIES : []}
+                  disabledReason="자가 출퇴근 — 숙소임대비·관리비 비대상"
+                  onDone={() => {
+                    // 인식·입력된 금액을 그 자리에서 확정하고 닫는다 — [전체 임시저장]까지 미루면
+                    // 그 사이 화면을 벗어났을 때 인식값이 0으로 되돌아간 채 저장된다 (실제 사고 사례)
+                    if (sheetRow.maintItems.some((it) => parseNum(it.amountGross) > 0)) {
+                      saveItem(sheet.id, sheet.isExtra, 'lodging_maintenance')
+                    }
+                    if (sheetRow.commuteMode !== 'daily_commute' && deriveRow(sheetRow, mealDailyLimit).lodgingRent > 0) {
+                      saveItem(sheet.id, sheet.isExtra, 'lodging_rent')
+                    }
+                    setSheet(null)
+                  }}
                 />
               )}
               {sheet.panel === 'maint' && (
@@ -1238,8 +1404,6 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                 <LodgingPanel
                   r={sheetRow}
                   onChange={(patch) => patchRow(sheet.id, sheet.isExtra, patch)}
-                  onSave={() => saveItem(sheet.id, sheet.isExtra, 'lodging_rent')}
-                  saveState={itemSaveState[`${sheet.id}::lodging_rent`]}
                 />
               )}
               {sheet.panel === 'commute' && (
@@ -1256,6 +1420,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                   defaultFuelType={sheet.id === myUserId ? myFuelType : undefined}
                   periodStart={sheetRow.periodStart}
                   periodEnd={sheetRow.periodEnd}
+                  initial={sheetRow.commuteCalc}
                   onApply={(params: CommuteApplyParams) => {
                     patchRow(sheet.id, sheet.isExtra, {
                       commuteRoundtrip: params.costPerTrip.toLocaleString('ko-KR'),

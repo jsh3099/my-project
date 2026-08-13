@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { StaffCostForm, type StaffCostDraftItem } from '@/components/expenses/StaffCostForm'
-import { SupportTripForm } from '@/components/expenses/SupportTripForm'
+import { SupportTripForm, type SupportTripDraft } from '@/components/expenses/SupportTripForm'
 import { getSiteBudgetStatus } from '@/lib/budgetStatus'
 import type { StaffType, CommuteMode, VehicleFuelType } from '@/lib/constants'
 import { STAFF_TYPE_LABELS } from '@/lib/constants'
@@ -141,6 +141,11 @@ export async function StaffCostsPageContent({
     .not('target_user_name', 'is', null)
     .is('deleted_at', null)
 
+  type CommuteCalcRaw = {
+    mode: CommuteMode; home_address: string | null; distance_oneway_km: number
+    fuel_type: VehicleFuelType; fuel_efficiency: number; fuel_price: number
+    fuel_price_date: string | null; toll_roundtrip: number; multiplier: number
+  }
   type DraftRaw = {
     subcategory: string
     target_user_id: string | null
@@ -151,14 +156,15 @@ export async function StaffCostsPageContent({
     receipt_urls: string[] | null
     calc_detail: LodgingCalcDetail | null
     expense_items: { item_date: string; tag: string | null; amount_gross: number; sort_order: number }[] | null
-    commute_calcs: {
-      mode: CommuteMode; home_address: string | null; distance_oneway_km: number
-      fuel_type: VehicleFuelType; fuel_efficiency: number; fuel_price: number
-      fuel_price_date: string | null; toll_roundtrip: number; multiplier: number
-    }[] | null
+    // to-one 임베드라 객체로 오지만, 스키마가 바뀌어 배열로 올 수도 있으므로 둘 다 받는다
+    commute_calcs: CommuteCalcRaw | CommuteCalcRaw[] | null
   }
   const existingDrafts: StaffCostDraftItem[] = ((draftData ?? []) as unknown as DraftRaw[]).map((d) => {
-    const commute = d.commute_calcs?.[0] ?? null
+    // commute_calcs는 expense_id에 UNIQUE가 걸려 있어 PostgREST가 **배열이 아닌 객체**로 돌려준다
+    // (expense_items는 UNIQUE가 없어 배열). 배열로만 읽으면 [0]이 undefined가 되어 저장된
+    // 왕복비가 폼에 복원되지 않고 빈칸으로 보인다 — 두 형태를 모두 받는다.
+    const cc = d.commute_calcs
+    const commute = (Array.isArray(cc) ? cc[0] : cc) ?? null
     return {
       identity: d.target_user_name,
       subcategory: d.subcategory,
@@ -199,6 +205,42 @@ export async function StaffCostsPageContent({
 
   // 기술지원 기술인은 주재비가 아닌 출장비(방문일별 산출)로 정산한다 — 정산서 2-1
   const isSupport = staffType === 'support'
+
+  // 이미 저장한 draft 출장비 — 주재비와 같은 이유로 재진입 시 거리·유가·통행료·첨부가 복원되어야 한다
+  let supportDrafts: SupportTripDraft[] = []
+  if (isSupport) {
+    const { data: tripData } = await admin
+      .from('expenses')
+      .select('target_user_name, receipt_urls, calc_detail, trip_visits(visit_date, fuel_price, fuel_price_date, toll)')
+      .eq('site_id', siteId)
+      .eq('year', parseInt(year, 10))
+      .eq('month', month)
+      .eq('status', 'draft')
+      .eq('subcategory', 'support_trip')
+      .not('target_user_name', 'is', null)
+      .is('deleted_at', null)
+    type TripRaw = {
+      target_user_name: string
+      receipt_urls: string[] | null
+      calc_detail: { originAddress?: string | null; distanceOnewayKm?: number; fuelType?: string } | null
+      trip_visits: { visit_date: string; fuel_price: number; fuel_price_date: string | null; toll: number }[] | null
+    }
+    supportDrafts = ((tripData ?? []) as unknown as TripRaw[]).map((d) => ({
+      identity: d.target_user_name,
+      originAddress: d.calc_detail?.originAddress ?? null,
+      distanceOnewayKm: Number(d.calc_detail?.distanceOnewayKm ?? 0),
+      fuelType: d.calc_detail?.fuelType ?? 'gasoline',
+      receiptUrls: d.receipt_urls ?? [],
+      visits: [...(d.trip_visits ?? [])]
+        .sort((a, b) => a.visit_date.localeCompare(b.visit_date))
+        .map((v) => ({
+          date: v.visit_date,
+          fuelPrice: Number(v.fuel_price ?? 0),
+          fuelPriceDate: v.fuel_price_date,
+          toll: Number(v.toll ?? 0),
+        })),
+    }))
+  }
 
   // 비목 계상 잔액 — 발주청 정산(매 기성·준공)은 증빙으로 채운 만큼만 지급되므로
   // 입력 화면에서 삭감 위험을 먼저 보이게 한다 (used에는 draft 포함, 현장 전체 기준)
@@ -249,6 +291,9 @@ export async function StaffCostsPageContent({
           siteAddress={site?.address}
           tripDailyAllowance={siteParams?.trip_daily_allowance ?? 25000}
           tripMealAllowance={siteParams?.trip_meal_allowance ?? 25000}
+          existingDrafts={supportDrafts}
+          periodStart={openRound?.period_start}
+          periodEnd={openRound?.period_end}
           categoryRemaining={categoryRemaining}
         />
       ) : (

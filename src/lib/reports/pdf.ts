@@ -742,6 +742,12 @@ function buildTripSection(data: SettlementReportData, sectionNo: Map<string, str
       ],
     ))
   }
-  out.push(attachNote('※ 유가 등은 운행일자의 한국석유공사 유가정보서비스(www.opinet.co.kr)에서 고시된 유가를 적용함'))
+  // 유가 기준일이 없는 방문은 기성기간 평균을 적용한 것 (오피넷 무료 조회 범위 밖 과거 방문일)
+  const hasAvgVisit = trips.some((e) => e.tripVisits.some((v) => !v.fuel_price_date))
+  out.push(attachNote(
+    hasAvgVisit
+      ? '※ 유가 등은 운행일자의 한국석유공사 유가정보서비스(www.opinet.co.kr)에서 고시된 유가를 적용함 (기준일 미표기분은 근무기간 내 고시일 평균)'
+      : '※ 유가 등은 운행일자의 한국석유공사 유가정보서비스(www.opinet.co.kr)에서 고시된 유가를 적용함',
+  ))
   return out
 }

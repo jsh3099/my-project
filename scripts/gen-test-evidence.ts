@@ -39,10 +39,10 @@ const RESIDENTS = [
   { name: '강희철', specialty: '책임건설사업관리기술인', lodging: false },
   { name: '성혁기', specialty: '건축', lodging: true },
 ]
-// 방문일은 류익선=매월 2·4번째 화요일 / 김태식=매월 2·4번째 목요일 (전 회차 20방문)
+// 방문일은 월 1회 — 류익선=매월 2번째 화요일 / 김태식=매월 2번째 목요일 (전 회차 10방문)
 const SUPPORTERS = [
-  { name: '류익선', specialty: '건축', visits: ['04-14', '04-28', '05-12', '05-26', '06-09', '06-23', '07-14', '07-28', '08-11', '08-25'] },
-  { name: '김태식', specialty: '토목', visits: ['04-09', '04-23', '05-14', '05-28', '06-11', '06-25', '07-09', '07-23', '08-13', '08-27'] },
+  { name: '류익선', specialty: '건축', visits: ['04-14', '05-12', '06-09', '07-14', '08-11'] },
+  { name: '김태식', specialty: '토목', visits: ['04-09', '05-14', '06-11', '07-09', '08-13'] },
 ]
 
 // 거주지 증빙 주소 — 전부 가상 주소다. 실주소를 넣으면 공개 저장소에 올릴 수 없어
@@ -428,48 +428,60 @@ async function genTripReceipt(outDir: string, name: string, date: string, kind: 
 }
 
 // ── 실행 ──────────────────────────────────────────────────────
-const ROOT = process.argv[2] ?? path.join(process.env.USERPROFILE ?? '.', 'Desktop', '테스트증빙_5회차')
+// 프로젝트가 CJS(package.json에 "type":"module" 없음)라 top-level await를 쓰면
+// `npx tsx scripts/gen-test-evidence.ts`가 "Top-level await is not supported"로 죽는다.
+// main()으로 감싸 두면 tsx·node --experimental-strip-types 어느 쪽으로도 실행된다.
+const ROOT = process.argv[2] && !process.argv[2].startsWith('--')
+  ? process.argv[2]
+  : path.join(process.env.USERPROFILE ?? '.', 'Desktop', '테스트증빙_5회차')
 
-verifyCalendar()
+async function main() {
+  verifyCalendar()
 
-await genResidentSheet(path.join(ROOT, '1.출근부'))
-await genSupportSheet(path.join(ROOT, '1.출근부'))
+  await genResidentSheet(path.join(ROOT, '1.출근부'))
+  await genSupportSheet(path.join(ROOT, '1.출근부'))
 
-const lodgers = RESIDENTS.filter((r) => r.lodging)
-for (const r of lodgers) {
-  await genRent(path.join(ROOT, '2.주재비_숙소'), r.name)
-  await genMaint(path.join(ROOT, '2.주재비_숙소'), r.name)
-}
-
-for (const r of RESIDENTS) await genResidenceCert(path.join(ROOT, '3.거주지증빙'), r.name, r.specialty, '상주')
-for (const s of SUPPORTERS) await genResidenceCert(path.join(ROOT, '3.거주지증빙'), s.name, s.specialty, '기술지원')
-
-for (const ym of MONTHS) {
-  for (const spec of SITE_EXPENSES) await genSiteExpense(path.join(ROOT, '4.현장경비', ym), ym, spec)
-}
-
-for (const s of SUPPORTERS) {
-  for (const v of s.visits) {
-    const date = `2026-${v}`
-    const dir = path.join(ROOT, '5.출장비', date.slice(0, 7))
-    await genTripReceipt(dir, s.name, date, '유류')
-    await genTripReceipt(dir, s.name, date, '통행료')
+  const lodgers = RESIDENTS.filter((r) => r.lodging)
+  for (const r of lodgers) {
+    await genRent(path.join(ROOT, '2.주재비_숙소'), r.name)
+    await genMaint(path.join(ROOT, '2.주재비_숙소'), r.name)
   }
+
+  for (const r of RESIDENTS) await genResidenceCert(path.join(ROOT, '3.거주지증빙'), r.name, r.specialty, '상주')
+  for (const s of SUPPORTERS) await genResidenceCert(path.join(ROOT, '3.거주지증빙'), s.name, s.specialty, '기술지원')
+
+  for (const ym of MONTHS) {
+    for (const spec of SITE_EXPENSES) await genSiteExpense(path.join(ROOT, '4.현장경비', ym), ym, spec)
+  }
+
+  for (const s of SUPPORTERS) {
+    for (const v of s.visits) {
+      const date = `2026-${v}`
+      const dir = path.join(ROOT, '5.출장비', date.slice(0, 7))
+      await genTripReceipt(dir, s.name, date, '유류')
+      await genTripReceipt(dir, s.name, date, '통행료')
+    }
+  }
+
+  // ── 기대값 요약 (입력·검증 시 대조용) ─────────────────────────
+  const maintElec = MONTHS.reduce((s, ym) => s + MAINT[ym].elec, 0)
+  const maintGas = MONTHS.reduce((s, ym) => s + MAINT[ym].gas, 0)
+  const welfareMonthly = SITE_EXPENSES.filter((s) => s.file.startsWith('복리후생'))
+    .reduce((s, x) => s + x.items.reduce((a, [, v]) => a + v, 0), 0)
+  const welfareLimit = RESIDENTS.length * 50_000
+
+  console.log(`\n생성 완료: ${written}개 파일 → ${ROOT}\n`)
+  console.log('── 입력·검증 기대값 ──')
+  console.log(`출근부 상주      ${RESIDENTS.map((r) => r.name).join('·')} — 월별 ${MONTHS.map((ym) => EXPECTED_DAYS[ym]).join('/')} = 106일/인`)
+  console.log(`출근부 기술지원   ${SUPPORTERS.map((s) => `${s.name} ${s.visits.length}일`).join(' · ')}`)
+  console.log(`숙소임대비       ${lodgers.map((r) => r.name).join('·')} — ${won(RENT_MONTHLY)} × 5개월 = ${won(RENT_MONTHLY * 5)}원`)
+  console.log(`관리비          전기 ${won(maintElec)} + 가스 ${won(maintGas)} = ${won(maintElec + maintGas)}원`)
+  console.log(`복리후생        월 ${won(welfareMonthly)} vs 한도 ${won(welfareLimit)} → 월 ${won(welfareMonthly - welfareLimit)} 불인정 (5개월)`)
+  console.log(`출장비 실비      방문 1회당 유류 ${won(TRIP_FUEL)} + 통행료 ${won(TRIP_TOLL)} — 총 ${SUPPORTERS.reduce((s, x) => s + x.visits.length, 0)}회`)
+  console.log(`거주지 증빙      4명 (전부 가상 주소 — 공개 저장소 커밋 가능)`)
 }
 
-// ── 기대값 요약 (입력·검증 시 대조용) ─────────────────────────
-const maintElec = MONTHS.reduce((s, ym) => s + MAINT[ym].elec, 0)
-const maintGas = MONTHS.reduce((s, ym) => s + MAINT[ym].gas, 0)
-const welfareMonthly = SITE_EXPENSES.filter((s) => s.file.startsWith('복리후생'))
-  .reduce((s, x) => s + x.items.reduce((a, [, v]) => a + v, 0), 0)
-const welfareLimit = RESIDENTS.length * 50_000
-
-console.log(`\n생성 완료: ${written}개 파일 → ${ROOT}\n`)
-console.log('── 입력·검증 기대값 ──')
-console.log(`출근부 상주      ${RESIDENTS.map((r) => r.name).join('·')} — 월별 ${MONTHS.map((ym) => EXPECTED_DAYS[ym]).join('/')} = 106일/인`)
-console.log(`출근부 기술지원   ${SUPPORTERS.map((s) => `${s.name} ${s.visits.length}일`).join(' · ')}`)
-console.log(`숙소임대비       ${lodgers.map((r) => r.name).join('·')} — ${won(RENT_MONTHLY)} × 5개월 = ${won(RENT_MONTHLY * 5)}원`)
-console.log(`관리비          전기 ${won(maintElec)} + 가스 ${won(maintGas)} = ${won(maintElec + maintGas)}원`)
-console.log(`복리후생        월 ${won(welfareMonthly)} vs 한도 ${won(welfareLimit)} → 월 ${won(welfareMonthly - welfareLimit)} 불인정 (5개월)`)
-console.log(`출장비 실비      방문 1회당 유류 ${won(TRIP_FUEL)} + 통행료 ${won(TRIP_TOLL)} — 총 ${SUPPORTERS.reduce((s, x) => s + x.visits.length, 0)}회`)
-console.log(`거주지 증빙      4명 (전부 가상 주소 — 공개 저장소 커밋 가능)`)
+main().catch((e) => {
+  console.error(e)
+  process.exit(1)
+})

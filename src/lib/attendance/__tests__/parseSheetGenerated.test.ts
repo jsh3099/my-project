@@ -50,24 +50,24 @@ describe.skipIf(!fs.existsSync(SUPPORT))('배포용 출근부 — 기술지원 (
     lines = await extractPdfLines(new Uint8Array(fs.readFileSync(SUPPORT)))
   })
 
-  // 방문일은 류익선=2·4번째 화요일 / 김태식=2·4번째 목요일 (전 회차 인당 10일)
+  // 방문일은 월 1회 — 류익선=2번째 화요일 / 김태식=2번째 목요일 (전 회차 인당 5일)
   it('방문일자를 인원별·월별로 인식한다', () => {
     expect(parseSupportVisits(lines, SUPPORT_NAMES, 2026, 4)).toEqual({
-      류익선: ['2026-04-14', '2026-04-28'],
-      김태식: ['2026-04-09', '2026-04-23'],
+      류익선: ['2026-04-14'],
+      김태식: ['2026-04-09'],
     })
     expect(parseSupportVisits(lines, SUPPORT_NAMES, 2026, 8)).toEqual({
-      류익선: ['2026-08-11', '2026-08-25'],
-      김태식: ['2026-08-13', '2026-08-27'],
+      류익선: ['2026-08-11'],
+      김태식: ['2026-08-13'],
     })
   })
 
-  it('인당 방문 10일 — 회차 전체 20회', () => {
+  it('인당 방문 5일 — 회차 전체 10회', () => {
     const total = Object.keys(EXPECTED_DAYS).reduce((sum, month) => {
       const r = parseSupportVisits(lines, SUPPORT_NAMES, 2026, Number(month))
       return sum + (r.류익선?.length ?? 0) + (r.김태식?.length ?? 0)
     }, 0)
-    expect(total).toBe(20)
+    expect(total).toBe(10)
   })
 
   // 문서 상단 "대상 기간 2026-04-01 ~ …" 줄을 방문일로 잡으면 출장 횟수가 부풀려진다

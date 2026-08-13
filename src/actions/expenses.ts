@@ -5,7 +5,9 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { expenseSchema } from '@/lib/validations/expense'
 import { calcCommute, calcItemized, calcTripVisit, calcWelfare, sumTripVisits, convertJeonseToMonthly } from '@/lib/settlement'
 import { FUEL_EFFICIENCY, type CommuteMode, type VehicleFuelType } from '@/lib/constants'
-import { receiptStoredValue } from '@/lib/storage/receipts'
+import { RECEIPTS_BUCKET, receiptStoragePath, receiptStoredValue } from '@/lib/storage/receipts'
+import { extractPdfLines } from '@/lib/attendance/parseSheet'
+import { parseRentTotal, parseMaintItems, type ParsedMaintItem } from '@/lib/receipts/parseReceipt'
 import type { LodgingCalcDetail } from '@/types'
 
 export async function createExpense(formData: FormData) {
@@ -582,6 +584,16 @@ export async function attachStaffCostReceipt(formData: FormData) {
   const files = (formData.getAll('files') as File[]).filter((f) => f.size > 0)
   if (files.length === 0) return { error: '업로드할 파일이 없습니다.' }
 
+  // 저장(saveStaffCostItem)과 같은 기준을 첨부에도 적용한다.
+  // 없으면 자가 출퇴근자에게 숙소비 첨부가 들어가면서 0원 draft가 만들어지고,
+  // 그 행은 저장이 영영 거부되어 증빙만 달린 유령 행으로 남는다.
+  if (
+    target.commuteMode === 'daily_commute' &&
+    (target.subcategory === 'lodging_rent' || target.subcategory === 'lodging_maintenance')
+  ) {
+    return { error: '자가 출퇴근자는 숙소임대비·관리비를 계상하지 않습니다.' }
+  }
+
   const draft = await findOrCreateStaffCostDraft(admin, user.id, target)
   if ('error' in draft) return draft
 
@@ -695,6 +707,70 @@ export async function saveStaffCostItem(formData: FormData) {
   }
 
   return { amount }
+}
+
+// 이미 저장된 영수증에서 금액을 다시 인식한다.
+// 자동 인식은 업로드 직후 한 번만 돌아가므로, 인식값을 저장하기 전에 화면을 벗어나면
+// 첨부만 남고 금액은 사라진다. 그때 첨부를 지웠다 다시 올리지 않아도 되게 하는 경로다.
+// (출근부 화면 거주지 증빙의 `주소 인식`과 같은 성격)
+//
+// 클라이언트가 보낸 경로를 그대로 믿지 않는다 — 사람(현장·연월·성명)으로 draft를 찾아
+// **DB에 실제로 달려 있는 첨부만** 읽는다. 저장소를 훑어보는 경로가 생기지 않는다.
+export async function reparseStaffCostReceipts(
+  formData: FormData,
+): Promise<{ error: string } | { rentTotal: number; maintItems: ParsedMaintItem[] }> {
+  const supabase = await createClient()
+  const admin = createAdminClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const target = JSON.parse(formData.get('target') as string) as StaffCostItemTarget
+  const [yr, mo] = target.yearMonth.split('-').map(Number)
+  const identityColumn = target.userId ? 'target_user_id' : 'target_user_name'
+  const identityValue = target.userId || target.userName
+
+  // 한 사람의 주재비 첨부는 비목별 행에 나뉘어 있다(숙소임대비·관리비) — 전부 모아 함께 읽는다
+  const { data: rows, error: findError } = await admin
+    .from('expenses')
+    .select('receipt_urls')
+    .eq('site_id', target.siteId)
+    .eq('year', yr)
+    .eq('month', mo)
+    .eq('status', 'draft')
+    .eq('category', 'site_residence')
+    .eq(identityColumn, identityValue)
+    .is('deleted_at', null)
+  if (findError) return { error: `조회 실패: ${findError.message}` }
+
+  const pdfs = (rows ?? [])
+    .flatMap((r) => (r.receipt_urls ?? []) as string[])
+    .filter((u) => u.split('#')[0].toLowerCase().endsWith('.pdf'))
+  if (pdfs.length === 0) {
+    return { error: '다시 인식할 PDF 첨부가 없습니다. (사진·스캔 이미지는 인식 대상이 아닙니다)' }
+  }
+
+  // 버킷이 비공개라 링크로는 못 읽는다 — 서비스 권한으로 내려받아 텍스트만 뽑는다.
+  // 경로 파서가 신규(경로)·레거시(공개 URL) 저장값을 모두 읽으므로 옛 첨부도 재인식된다.
+  const lines: string[] = []
+  for (const stored of pdfs) {
+    const path = receiptStoragePath(stored)
+    if (!path) continue
+    const { data: blob, error: dlError } = await admin.storage.from(RECEIPTS_BUCKET).download(path)
+    if (dlError || !blob) {
+      console.error('[reparse] 첨부 다운로드 실패:', path, dlError?.message)
+      continue
+    }
+    try {
+      lines.push(...(await extractPdfLines(new Uint8Array(await blob.arrayBuffer()))))
+    } catch (e) {
+      console.error('[reparse] PDF 읽기 실패:', path, e)
+    }
+  }
+  if (lines.length === 0) {
+    return { error: '첨부를 읽지 못했습니다. 금액을 직접 입력하세요.' }
+  }
+
+  return { rentTotal: parseRentTotal(lines), maintItems: parseMaintItems(lines) }
 }
 
 // ── 기술지원 기술인 출장비 (정산서 2-1) ──────────────────────────
