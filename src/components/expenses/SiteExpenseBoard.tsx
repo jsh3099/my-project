@@ -98,6 +98,14 @@ function categoryChipLabel(category: ExpenseCategory, subcategory: string): stri
   return EXPENSE_CATEGORY_LABELS[category]
 }
 
+// 피커 탭 라벨 — 현장주재비 탭에는 숙식비·교통비가 안 나온다(그 둘은 주재비 화면 담당이라
+// entryType 필터에서 빠진다). 남는 건 현장운영경비 6종뿐인데 탭 이름이 '현장주재비'면
+// 사이드바 「상주기술인 주재비」와 같은 말로 읽혀 중복처럼 보인다 — 실제 내용대로 적는다.
+// 정산서 출력의 비목명은 예본 서식이므로 EXPENSE_CATEGORY_LABELS 그대로 둔다.
+function pickerTabLabel(category: ExpenseCategory): string {
+  return category === 'site_residence' ? '현장운영경비' : EXPENSE_CATEGORY_LABELS[category]
+}
+
 function subDef(category: ExpenseCategory, subcategory: string) {
   return EXPENSE_SUBCATEGORIES[category]?.find((s) => s.value === subcategory)
 }
@@ -391,10 +399,31 @@ export function SiteExpenseBoard({
   const pickerSubs = (EXPENSE_SUBCATEGORIES[pickerCategory] ?? []).filter(
     (s) => s.entryType === 'manual_site' || s.entryType === 'manual_person',
   )
+  // 방금 만든 카드로 데려간다 — 피커는 화면 맨 아래이고 카드는 위에 쌓이므로,
+  // 항목이 몇 개만 쌓여도 새 카드가 화면 밖에 생겨 "눌러도 아무 일 없다"고 읽힌다(실측: 4번째부터).
+  //
+  // 스크롤은 effect에서 한다: 카드를 추가한 직후에는 React가 아직 DOM에 커밋하지 않아
+  // ref가 비어 있고(rAF로도 이르다), 같은 카드를 다시 눌렀을 때도 다시 움직여야 하므로
+  // key가 아니라 nonce까지 담아 effect가 매번 재실행되게 한다.
+  const cardRefs = useRef<Record<string, HTMLElement | null>>({})
+  const [flash, setFlash] = useState<{ key: string; n: number } | null>(null)
+  const flashKey = flash?.key ?? null
+  function revealCard(key: string) {
+    setOpenCards((p) => new Set(p).add(key))
+    setFlash((f) => ({ key, n: (f?.n ?? 0) + 1 }))
+  }
+  useEffect(() => {
+    if (!flash) return
+    cardRefs.current[flash.key]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const t = window.setTimeout(() => setFlash((f) => (f && f.n === flash.n ? null : f)), 2000)
+    return () => window.clearTimeout(t)
+  }, [flash])
+
   function addCard(category: ExpenseCategory, subcategory: string) {
     const key = `${subcategory}::`
+    // 이미 있는 항목을 다시 누르면 그 카드로 데려간다 (되돌릴 길이 카드 ✕뿐이던 문제)
     if (cards.some((c) => c.subcategory === subcategory && !c.targetUserId)) {
-      setOpenCards((p) => new Set(p).add(key))
+      revealCard(key)
       return
     }
     const def = subDef(category, subcategory)
@@ -410,7 +439,7 @@ export function SiteExpenseBoard({
       receiptUrls: [],
       savedTotal: 0,
     }])
-    setOpenCards((p) => new Set(p).add(key))
+    revealCard(key)
   }
 
   // ── 상태 칩 ──
@@ -477,7 +506,12 @@ export function SiteExpenseBoard({
       : 'grid-cols-[104px_1fr_1.5fr_110px_110px_76px_28px]'
 
     return (
-      <article key={card.key} className={`overflow-hidden rounded-xl border border-gray-200 border-l-4 ${accent.border} bg-white shadow-sm`}>
+      <article key={card.key}
+        ref={(el) => { cardRefs.current[card.key] = el }}
+        /* 방금 추가·이동한 카드는 잠깐 강조한다 — 스크롤만으로는 어느 것이 새 카드인지 안 보인다 */
+        className={`overflow-hidden rounded-xl border border-l-4 bg-white shadow-sm transition-all ${accent.border} ${
+          flashKey === card.key ? 'border-blue-400 ring-2 ring-blue-300' : 'border-gray-200'
+        }`}>
         {/* 요약 행 */}
         <div
           className="flex cursor-pointer select-none flex-wrap items-center gap-x-2.5 gap-y-1.5 px-4 py-3 hover:bg-gray-50/70"
@@ -746,18 +780,33 @@ export function SiteExpenseBoard({
               className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
                 pickerCategory === cat ? CATEGORY_ACCENT[cat].chip + ' ring-1 ring-current' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
               }`}>
-              {EXPENSE_CATEGORY_LABELS[cat]}
+              {pickerTabLabel(cat)}
             </button>
           ))}
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {pickerSubs.map((s) => {
             const added = addedSubs.has(s.value)
+            // 이미 추가된 항목도 누를 수 있다 — 종전엔 disabled라 잘못 눌렀을 때
+            // 되돌리는 길이 카드 ✕뿐이었는데, 그 카드가 화면 밖이라 찾을 수도 없었다
+            const card = added ? cards.find((c) => c.subcategory === s.value) : undefined
+            const emptyCard = !!card && card.items.length === 0 && card.savedTotal === 0 && card.receiptUrls.length === 0
             return (
-              <button key={s.value} type="button" onClick={() => addCard(pickerCategory, s.value)} disabled={added}
-                className="rounded-lg border border-gray-200 px-3 py-2 text-left text-sm transition-colors hover:border-blue-400 hover:bg-blue-50/50 disabled:opacity-45">
-                <span className="block font-medium text-gray-700">{s.label}</span>
-                <span className="mt-0.5 block text-[11px] text-gray-400">{added ? '이미 추가됨' : s.notes ?? (s.requireDocs[0] ?? '')}</span>
+              <button key={s.value} type="button" onClick={() => addCard(pickerCategory, s.value)}
+                title={added
+                  ? (emptyCard ? '비어 있는 카드입니다 — 눌러서 이동한 뒤 ✕로 닫을 수 있습니다' : '이 항목 카드로 이동합니다')
+                  : undefined}
+                className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                  added
+                    ? 'border-gray-200 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50'
+                    : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50/50'
+                }`}>
+                <span className={`block font-medium ${added ? 'text-gray-400' : 'text-gray-700'}`}>{s.label}</span>
+                <span className="mt-0.5 block text-[11px] text-gray-400">
+                  {added
+                    ? (emptyCard ? '추가됨 (비어 있음) — 눌러서 이동' : '추가됨 — 눌러서 이동')
+                    : s.notes ?? (s.requireDocs[0] ?? '')}
+                </span>
               </button>
             )
           })}
