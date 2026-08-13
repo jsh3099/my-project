@@ -45,15 +45,19 @@ const SUPPORTERS = [
   { name: '김태식', specialty: '토목', visits: ['04-09', '05-14', '06-11', '07-09', '08-13'] },
 ]
 
-// 거주지 증빙 주소 — 전부 가상 주소다. 실주소를 넣으면 공개 저장소에 올릴 수 없어
+// 거주지 증빙 주소 — **번지까지 전부 가상**이다. 실주소를 넣으면 공개 저장소에 올릴 수 없어
 // 테스트가 기대값을 코드에 적지 못하게 되고, 결국 픽스처를 커밋할 수 없게 된다.
-// 주소 형태를 일부러 흩어 놓았다(특별시 / 광역 도 / 시·구, 아파트 동·호 / 빌라 층) —
-// parseResidenceAddress의 행정구역 판정 분기를 픽스처가 함께 덮는다.
+// (실주소로 거리·통행료를 예본과 맞춰 봐야 할 때는 생성기를 고치지 말고 그 파일만 따로 만들어 쓴다)
+// 주소 형태를 일부러 흩어 놓았다 — parseResidenceAddress의 `ADDR_REGION` 분기를 픽스처가 함께 덮는다:
+//   충청북도 …  → `[가-힣]{2,}도\s` (도 단위)      / 아파트 동·호
+//   충북 …시 …구 → `[가-힣]{2,}시`   (약칭 + 시·구) / 빌라 층
+//   서울특별시   → `특별시`                          / 도로명 + 층·호
+//   서울시 …구 …동 …번지 → `[가-힣]{2,}구`          / **지번 주소**(도로명이 아닌 형태)
 const HOME_ADDRESSES: Record<string, string> = {
-  강희철: '충북 청주시 서원구 테스트로 100, 가상아파트 101동 1001호',
+  강희철: '충청북도 청주시 서원구 테스트로 100, 가상아파트 101동 1001호',
   성혁기: '충북 청주시 흥덕구 시험대로 22, 샘플빌라 3층',
   류익선: '서울특별시 용산구 예시로 45, 테스트타워 12층 1203호',
-  김태식: '경기도 성남시 분당구 가상로 88, 모의아파트 205동 802호',
+  김태식: '서울시 마포구 도화동 100-1번지',
 }
 
 // `--with-fixtures`로 실행하면 재직증명서를 리포 픽스처로도 함께 내보낸다.
@@ -62,7 +66,7 @@ const CERT_FIXTURES: Record<string, string> = {
   강희철: 'cert_chungbuk_apt.pdf',
   성혁기: 'cert_chungbuk_villa.pdf',
   류익선: 'cert_seoul.pdf',
-  김태식: 'cert_gyeonggi.pdf',
+  김태식: 'cert_seoul_jibun.pdf',
 }
 const FIXTURE_DIR = path.join(process.cwd(), 'src', 'lib', 'receipts', '__tests__', 'fixtures')
 const WITH_FIXTURES = process.argv.includes('--with-fixtures')

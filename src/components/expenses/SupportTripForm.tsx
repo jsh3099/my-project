@@ -185,19 +185,26 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
     })
   }
 
-  // 방문일별 산출 (미리보기 — 서버가 동일 함수로 재계산)
+  // 방문일별 산출 (미리보기 — 서버가 동일 함수로 재계산).
+  // **일비·식비는 방문 사실만으로 확정된다** — 출근부에 방문일이 전기되면 거리·유가와
+  // 무관하게 계상된다(정산기준·예본 2-1). 종전에는 거리·유가가 비면 null을 돌려줘
+  // 출근부가 붙어 있는데도 일비·식비가 0원으로 보이고 저장조차 되지 않았다.
+  // 거리·유가가 없으면 유류비만 0이 된다(calcTripVisit이 0으로 계산).
   function visitCalc(r: PersonRow, v: Visit) {
-    const dist = parseFloat(r.distanceOneway) || 0
-    const price = parseNum(v.fuelPrice)
-    if (dist <= 0 || price <= 0) return null
+    if (!v.date) return null
     return calcTripVisit({
-      distanceOnewayKm: dist,
+      distanceOnewayKm: parseFloat(r.distanceOneway) || 0,
       fuelEfficiency: FUEL_EFFICIENCY[r.fuelType].value,
-      fuelPrice: price,
+      fuelPrice: parseNum(v.fuelPrice),
       toll: parseNum(v.toll),
       dailyAllowance: tripDailyAllowance,
       mealAllowance: tripMealAllowance,
     })
+  }
+
+  // 유류비가 산출된 방문인지 — 교통비 타일·상태 칩이 "무엇이 아직 비었나"를 가릴 때 쓴다
+  function isFuelPriced(r: PersonRow, v: Visit) {
+    return (parseFloat(r.distanceOneway) || 0) > 0 && parseNum(v.fuelPrice) > 0
   }
 
   function rowTotal(r: PersonRow) {
@@ -208,37 +215,56 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
   // 편도거리를 채운다. 고속도로 우선(TIME) 기준 — 추천 경로는 무료도로면 통행료가 0으로 나온다.
   // 왕복 통행료는 통행료가 비어 있는 방문일에만 채운다(수기 입력값은 보존).
   const [routingRows, setRoutingRows] = useState<Set<string>>(new Set())
-  function autoRoute(rowId: string) {
+  async function autoRoute(rowId: string): Promise<boolean> {
     setError(null)
     const r = rows.find((x) => x.id === rowId)
-    if (!r) return
-    if (!r.originAddress.trim()) { setError('자택주소를 먼저 입력하세요.'); return }
-    if (!siteAddress) { setError('현장주소가 등록되지 않았습니다. 상주기술인 주재비 → 자차 왕복비 산출에서 현장주소를 저장하세요.'); return }
+    if (!r) return false
+    if (!r.originAddress.trim()) { setError('자택주소를 먼저 입력하세요. (출근부 화면에서 거주지 증빙을 첨부하면 자동으로 채워집니다)'); return false }
+    if (!siteAddress) { setError('현장주소가 등록되지 않았습니다. 대시보드 · 현장 정보에서 입력하세요.'); return false }
 
     const fd = new FormData()
     fd.set('home_address', r.originAddress)
     fd.set('site_address', siteAddress)
     fd.set('fuel_type', r.fuelType)
-    fd.set('fuel_price', '1') // 거리·통행료만 필요 — 유가는 방문일별 오피넷 조회를 쓴다
+    fd.set('fuel_price', '1') // 거리·통행료만 필요 — 유가는 오피넷 조회를 쓴다
     fd.set('route_priority', 'TIME')
 
     setRoutingRows((p) => new Set(p).add(rowId))
-    calcCommuteCost(fd).then((res) => {
-      setRoutingRows((p) => { const n = new Set(p); n.delete(rowId); return n })
-      if ('error' in res) {
-        setError(res.error + ' — 지도에서 확인한 편도거리를 직접 입력해도 됩니다.')
-        return
+    const res = await calcCommuteCost(fd)
+    setRoutingRows((p) => { const n = new Set(p); n.delete(rowId); return n })
+    if ('error' in res) {
+      setError(res.error + ' — 지도에서 확인한 편도거리를 직접 입력해도 됩니다.')
+      return false
+    }
+    const tollStr = res.data.tollRoundTrip > 0 ? res.data.tollRoundTrip.toLocaleString('ko-KR') : ''
+    setRows((p) => p.map((row) => {
+      if (row.id !== rowId) return row
+      return {
+        ...row,
+        distanceOneway: String(res.data.distanceOneWayKm),
+        visits: tollStr ? row.visits.map((v) => (v.toll ? v : { ...v, toll: tollStr })) : row.visits,
       }
-      const tollStr = res.data.tollRoundTrip > 0 ? res.data.tollRoundTrip.toLocaleString('ko-KR') : ''
-      setRows((p) => p.map((row) => {
-        if (row.id !== rowId) return row
-        return {
-          ...row,
-          distanceOneway: String(res.data.distanceOneWayKm),
-          visits: tollStr ? row.visits.map((v) => (v.toll ? v : { ...v, toll: tollStr })) : row.visits,
-        }
-      }))
-    })
+    }))
+    return true
+  }
+
+  // 거리·유가 한 번에 채우기 — 인원마다 산출 시트를 열어 [자동]을 두 번 누르던 수고를 없앤다.
+  // 저장 전에 화면을 벗어나면 값이 사라져 이 왕복이 매번 반복됐다(테스터 실사용 피드백).
+  const [autoFillRows, setAutoFillRows] = useState<Set<string>>(new Set())
+  async function autoFillRow(rowId: string) {
+    const r = rows.find((x) => x.id === rowId)
+    if (!r) return
+    setAutoFillRows((p) => new Set(p).add(rowId))
+    try {
+      // 거리가 이미 있으면 경로 조회는 건너뛴다 (수기 입력값·저장값 보존)
+      if (!(parseFloat(r.distanceOneway) > 0)) {
+        const ok = await autoRoute(rowId)
+        if (!ok) return // 자택·현장주소 문제는 autoRoute가 안내한다
+      }
+      await autoRowFuelPrice(rowId)
+    } finally {
+      setAutoFillRows((p) => { const n = new Set(p); n.delete(rowId); return n })
+    }
   }
 
   // 유가 적용 근거 안내 — 기간 평균으로 채웠을 때 표본을 보여준다 (상주 교통비와 동일)
@@ -292,36 +318,31 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
 
   // 오피넷 자동조회 — 기준일을 고르면 그날 고시가, 비워두면 기성기간 평균.
   // 상주 교통비(CommuteCalcPanel)와 동일한 분기라, 유료 API로 바뀌어도 두 화면이 같이 움직인다.
-  function autoRowFuelPrice(rowId: string) {
+  async function autoRowFuelPrice(rowId: string) {
     const r = rows.find((x) => x.id === rowId)
     if (!r) return
     setError(null)
     setFuelRows((p) => new Set(p).add(rowId))
-    const done = () => setFuelRows((p) => { const n = new Set(p); n.delete(rowId); return n })
-
-    if (!r.fuelPriceDate && periodStart && periodEnd) {
-      getFuelPriceAverageForPeriod(periodStart, periodEnd, r.fuelType).then((res) => {
-        done()
+    try {
+      if (!r.fuelPriceDate && periodStart && periodEnd) {
+        const res = await getFuelPriceAverageForPeriod(periodStart, periodEnd, r.fuelType)
         if ('error' in res) { setError(res.error); return }
         applyRowFuelPrice(rowId, res.data.price, '', 'avg')
         setFuelBasisNotice(
           `${r.name || '이 인원'} 유가: 기성기간(${periodStart}~${periodEnd}) 오피넷 평균 ${res.data.price.toLocaleString('ko-KR')}원 — 고시일 ${res.data.sampleDays}일 표본(${res.data.from}~${res.data.to})을 방문일 전체에 적용했습니다. 정산서에는 '기간 평균'으로 표기됩니다.`,
         )
-      })
-      return
-    }
+        return
+      }
 
-    const target = r.fuelPriceDate || new Date().toISOString().slice(0, 10)
-    getFuelPriceForDate(target, r.fuelType).then(async (res) => {
+      const target = r.fuelPriceDate || new Date().toISOString().slice(0, 10)
+      const res = await getFuelPriceForDate(target, r.fuelType)
       if (!('error' in res)) {
-        done()
         applyRowFuelPrice(rowId, res.data.price, res.data.date, 'daily')
         return
       }
       // 조회 범위(최근 7일) 밖 — 기간 평균으로 대체
       if (periodStart && periodEnd) {
         const avg = await getFuelPriceAverageForPeriod(periodStart, periodEnd, r.fuelType)
-        done()
         if (!('error' in avg)) {
           applyRowFuelPrice(rowId, avg.data.price, '', 'avg')
           setFuelBasisNotice(
@@ -330,9 +351,10 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
           return
         }
       }
-      done()
       setError(res.error)
-    })
+    } finally {
+      setFuelRows((p) => { const n = new Set(p); n.delete(rowId); return n })
+    }
   }
 
   const grandTotal = rows.reduce((s, r) => s + rowTotal(r), 0)
@@ -404,19 +426,23 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
     // ── 비목 요약 (교통비 / 일비 / 식비) ──
     // 정산기준·예본 2-1이 출장비를 이 세 항목으로 정의하는데, 방문일 표만으로는
     // 항목별 합계가 안 보인다 — 주재비 카드의 비목 그리드와 같은 방식으로 보여준다.
-    // 산출이 완성된 방문(거리·유가가 있는)만 집계해 타일 합 = 소계가 항상 일치하게 한다.
+    // 일비·식비는 **방문 횟수만으로** 확정되고(출근부 연동으로 즉시 금액이 잡힌다),
+    // 교통비만 거리·유가에 의존한다 — 셋을 한 조건으로 묶으면 출근부가 붙어 있는데도
+    // 전부 0원으로 보인다(실제 발생한 문제).
     const dated = r.visits.filter((v) => v.date)
-    const complete = dated.filter((v) => visitCalc(r, v) !== null)
-    const pendingFuel = dated.length - complete.length
-    const fuelSum = complete.reduce((s, v) => s + (visitCalc(r, v)?.fuelCost ?? 0), 0)
-    const tollSum = complete.reduce((s, v) => s + parseNum(v.toll), 0)
+    const priced = dated.filter((v) => isFuelPriced(r, v))
+    const pendingFuel = dated.length - priced.length
+    const fuelSum = dated.reduce((s, v) => s + (visitCalc(r, v)?.fuelCost ?? 0), 0)
+    const tollSum = dated.reduce((s, v) => s + parseNum(v.toll), 0)
     const transportTotal = fuelSum + tollSum
     // 유가 출처 칩 — 전부 기간 평균이면 그렇게, 전부 당일가면 자동, 섞이면 수기 포함
-    const pricedBasis = complete.every((v) => v.basis === 'avg')
+    const pricedBasis = priced.every((v) => v.basis === 'avg')
       ? (['bg-teal-50 text-teal-700', '기간 평균'] as const)
-      : complete.every((v) => v.fuelPriceDate)
+      : priced.every((v) => v.fuelPriceDate)
         ? (['bg-blue-50 text-blue-600', '자동'] as const)
         : (['bg-gray-100 text-gray-500', '수기 포함'] as const)
+    // 거리·유가가 비어 있으면 한 번에 채운다 — 인원마다 [자동] 두 번을 반복하던 수고 제거
+    const needsAutoFill = dated.length > 0 && (!(parseFloat(r.distanceOneway) > 0) || pendingFuel > 0)
     const tileChip = (cls: string, label: string) => (
       <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${cls}`}>{label}</span>
     )
@@ -466,18 +492,23 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
                   <span className="text-xs font-semibold text-gray-500">교통비 <span className="font-normal text-gray-400">(왕복유류비+통행료)</span></span>
                   {pendingFuel > 0
                     ? tileChip('bg-amber-50 text-amber-700', `유가 확인 ${pendingFuel}건`)
-                    : complete.length > 0
+                    : priced.length > 0
                       ? tileChip(pricedBasis[0], pricedBasis[1])
                       : tileChip('bg-gray-100 text-gray-400', '미입력')}
                 </div>
                 <div className="text-[15px] font-bold text-gray-900">{transportTotal > 0 ? `${transportTotal.toLocaleString()}원` : '—'}</div>
-                {complete.length > 0 && (
+                {priced.length > 0 && (
                   <p className="text-[11px] text-gray-400">
-                    유류 {fuelSum.toLocaleString()} + 통행료 {tollSum.toLocaleString()} · {complete.length}회
+                    유류 {fuelSum.toLocaleString()} + 통행료 {tollSum.toLocaleString()} · {priced.length}회
                   </p>
                 )}
-                {pendingFuel > 0 && (
-                  <p className="text-[11px] text-amber-600">유가 미입력 {pendingFuel}건 — 산출에서 [자동]을 누르세요</p>
+                {/* 거리·유가를 한 번에 — 종전엔 인원마다 산출 시트를 열어 [자동]을 두 번 눌러야 했다 */}
+                {needsAutoFill && (
+                  <button type="button" onClick={() => autoFillRow(r.id)} disabled={autoFillRows.has(r.id)}
+                    title="자택↔현장 편도거리·통행료(카카오)와 유가(오피넷)를 한 번에 채웁니다"
+                    className="w-fit rounded-lg border border-green-300 bg-green-50 px-2 py-1 text-[11px] font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50">
+                    {autoFillRows.has(r.id) ? '채우는 중…' : `⚡ 거리·유가 자동 채우기 (${pendingFuel > 0 ? `유가 ${pendingFuel}건 ` : ''}미입력)`}
+                  </button>
                 )}
                 <button type="button" onClick={() => setSheetRowId(r.id)}
                   className="mt-auto text-left text-xs font-semibold text-green-700 hover:underline">
@@ -487,18 +518,18 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
               <div className="flex min-h-[92px] flex-col gap-1 bg-white p-3.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold text-gray-500">일비</span>
-                  {complete.length > 0 ? tileChip('bg-blue-50 text-blue-600', '자동') : tileChip('bg-gray-100 text-gray-400', '미입력')}
+                  {dated.length > 0 ? tileChip('bg-blue-50 text-blue-600', '자동') : tileChip('bg-gray-100 text-gray-400', '미입력')}
                 </div>
-                <div className="text-[15px] font-bold text-blue-700">{complete.length > 0 ? `${(complete.length * tripDailyAllowance).toLocaleString()}원` : '—'}</div>
-                <p className="text-[11px] text-gray-400">{complete.length}회 × {tripDailyAllowance.toLocaleString()}원 (출근부 방문일 기준)</p>
+                <div className="text-[15px] font-bold text-blue-700">{dated.length > 0 ? `${(dated.length * tripDailyAllowance).toLocaleString()}원` : '—'}</div>
+                <p className="text-[11px] text-gray-400">{dated.length}회 × {tripDailyAllowance.toLocaleString()}원 (출근부 방문일 기준)</p>
               </div>
               <div className="flex min-h-[92px] flex-col gap-1 bg-white p-3.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold text-gray-500">식비</span>
-                  {complete.length > 0 ? tileChip('bg-blue-50 text-blue-600', '자동') : tileChip('bg-gray-100 text-gray-400', '미입력')}
+                  {dated.length > 0 ? tileChip('bg-blue-50 text-blue-600', '자동') : tileChip('bg-gray-100 text-gray-400', '미입력')}
                 </div>
-                <div className="text-[15px] font-bold text-blue-700">{complete.length > 0 ? `${(complete.length * tripMealAllowance).toLocaleString()}원` : '—'}</div>
-                <p className="text-[11px] text-gray-400">{complete.length}회 × {tripMealAllowance.toLocaleString()}원 (출근부 방문일 기준)</p>
+                <div className="text-[15px] font-bold text-blue-700">{dated.length > 0 ? `${(dated.length * tripMealAllowance).toLocaleString()}원` : '—'}</div>
+                <p className="text-[11px] text-gray-400">{dated.length}회 × {tripMealAllowance.toLocaleString()}원 (출근부 방문일 기준)</p>
               </div>
             </div>
 

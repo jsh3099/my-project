@@ -17,11 +17,13 @@ const readFixture = (name: string) => new Uint8Array(fs.readFileSync(path.join(F
 //
 // 픽스처를 다시 만들 때: `node --experimental-strip-types scripts/gen-test-evidence.ts --with-fixtures`
 // (주소 문자열은 생성기의 HOME_ADDRESSES와 한 쌍이다 — 한쪽만 바꾸면 이 테스트가 잡아낸다)
+// 주소 형태를 흩어 `ADDR_REGION`의 분기(도 단위 / 시·구 / 특별시)와
+// 표기 형태(도로명 + 동·호 / 층 / **지번**)를 함께 덮는다
 const CERTS: [string, string][] = [
-  ['cert_chungbuk_apt.pdf', '충북 청주시 서원구 테스트로 100, 가상아파트 101동 1001호'],
+  ['cert_chungbuk_apt.pdf', '충청북도 청주시 서원구 테스트로 100, 가상아파트 101동 1001호'],
   ['cert_chungbuk_villa.pdf', '충북 청주시 흥덕구 시험대로 22, 샘플빌라 3층'],
   ['cert_seoul.pdf', '서울특별시 용산구 예시로 45, 테스트타워 12층 1203호'],
-  ['cert_gyeonggi.pdf', '경기도 성남시 분당구 가상로 88, 모의아파트 205동 802호'],
+  ['cert_seoul_jibun.pdf', '서울시 마포구 도화동 100-1번지'],
 ]
 
 describe('거주지 증빙 주소 인식', () => {
