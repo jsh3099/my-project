@@ -6,17 +6,23 @@ import type { Site } from '@/types'
 interface SiteSelectProps {
   sites: Site[]
   selectedSiteId: string
-  ym: string
+  /** 월 필터가 있는 화면(입력 내역)만 사용 — 없으면 site만 붙인다 */
+  ym?: string
+  /** 이동할 화면. 대시보드처럼 월 필터가 없는 화면에서도 쓰려고 받는다 */
+  basePath?: string
 }
 
-export function SiteSelect({ sites, selectedSiteId, ym }: SiteSelectProps) {
+export function SiteSelect({ sites, selectedSiteId, ym, basePath = '/expenses' }: SiteSelectProps) {
   const router = useRouter()
   return (
     <select
       defaultValue={selectedSiteId}
+      aria-label="현장 선택"
       className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
       onChange={(e) => {
-        router.push(`/expenses?site=${e.target.value}&month=${ym}`)
+        const q = new URLSearchParams({ site: e.target.value })
+        if (ym) q.set('month', ym)
+        router.push(`${basePath}?${q}`)
       }}
     >
       {sites.map((s) => (
