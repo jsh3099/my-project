@@ -14,7 +14,12 @@ interface Props {
   yearMonth: string
   hasDraft: boolean
   /** 진행 중 기성회차 — 제출은 회차 기성기간 전체 단위 (없으면 월 단위 폴백) */
-  round?: { label: string; draftCount: number; draftAmount: number } | null
+  round?: {
+    label: string
+    draftCount: number; draftAmount: number
+    /** 이미 제출·승인된 건 — 제출할 것이 없을 때 상태를 보여주기 위해 */
+    sentCount: number; sentAmount: number
+  } | null
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -120,6 +125,37 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft, round = nul
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* 제출할 것이 없을 때도 자리를 비우지 않는다 — 종전엔 배너가 통째로 사라져
+          이 화면이 제출하는 곳이라는 표시조차 남지 않았다(제출 직후 실측).
+          비활성 버튼을 남겨 다음에 무엇을 하는 자리인지 계속 보이게 한다. */}
+      {!submittable && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <div className="min-w-0 flex-1">
+            {round && round.sentCount > 0 ? (
+              <>
+                <p className="text-sm font-semibold text-green-700">✓ 제출 완료</p>
+                <p className="text-xs text-gray-500">
+                  {round.label} <b>{round.sentCount}건 · {round.sentAmount.toLocaleString()}원</b>을 본사에 제출했습니다 —
+                  본사 검토 후 승인됩니다. 새로 입력한 항목이 생기면 여기에서 제출합니다.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-semibold text-gray-600">제출할 항목이 없습니다</p>
+                <p className="text-xs text-gray-500">
+                  비용을 입력하면 {round ? `${round.label} 전체를` : '작성중인 항목을'} 여기에서 한 번에 본사로 제출합니다.
+                </p>
+              </>
+            )}
+          </div>
+          <button type="button" disabled
+            className="flex items-center gap-2 rounded-lg bg-gray-300 px-4 py-2 text-sm font-semibold text-white">
+            <Send className="h-4 w-4" />
+            본사 제출
+          </button>
         </div>
       )}
 

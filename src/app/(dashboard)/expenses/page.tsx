@@ -51,7 +51,12 @@ export default async function ExpensesPage({
 
   let expenses: Expense[] = []
   // 제출은 회차 단위 — 진행 중 회차의 작성중 항목 현황(조회 월과 무관)을 함께 집계한다
-  let round: { label: string; draftCount: number; draftAmount: number } | null = null
+  let round: {
+    label: string; no: number
+    draftCount: number; draftAmount: number
+    sentCount: number; sentAmount: number
+    totalCount: number; totalAmount: number
+  } | null = null
   if (selectedSiteId) {
     const [{ data }, { data: openRoundData }] = await Promise.all([
       supabase
@@ -73,19 +78,28 @@ export default async function ExpensesPage({
 
     const openRound = (openRoundData ?? null) as SettlementRound | null
     if (openRound) {
-      const { data: draftRows } = await supabase
+      // 상태를 함께 읽어 draft(제출 대상)와 회차 전체(요약 카드)를 한 번의 조회로 나눈다
+      const { data: roundRows } = await supabase
         .from('expenses')
-        .select('amount, over_limit_amount')
+        .select('amount, over_limit_amount, status')
         .eq('site_id', selectedSiteId)
         .eq('user_id', user.id)
-        .eq('status', 'draft')
         .is('deleted_at', null)
         .in('year_month', monthsOfRound(openRound))
-      const drafts = draftRows ?? []
+      const rows = roundRows ?? []
+      const recognized = (e: { amount: number; over_limit_amount: number | null }) =>
+        e.amount - (e.over_limit_amount ?? 0)
+      const drafts = rows.filter((e) => e.status === 'draft')
+      const sent = rows.filter((e) => e.status === 'submitted' || e.status === 'approved')
       round = {
         label: `${openRound.round_no}회차 (${openRound.period_start} ~ ${openRound.period_end})`,
+        no: openRound.round_no,
         draftCount: drafts.length,
-        draftAmount: drafts.reduce((s, e) => s + (e.amount - (e.over_limit_amount ?? 0)), 0),
+        draftAmount: drafts.reduce((s, e) => s + recognized(e), 0),
+        sentCount: sent.length,
+        sentAmount: sent.reduce((s, e) => s + recognized(e), 0),
+        totalCount: rows.length,
+        totalAmount: rows.reduce((s, e) => s + recognized(e), 0),
       }
     }
   }
@@ -103,7 +117,7 @@ export default async function ExpensesPage({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">입력 내역 · 본사 제출</h1>
+          <h1 className="text-xl font-bold text-gray-900">본사 제출</h1>
           <p className="mt-1 text-sm text-gray-500">
             입력한 직접경비를 월별로 확인하고, 진행 중 기성회차 전체를 한 번에 본사로 제출합니다.
           </p>
@@ -131,12 +145,22 @@ export default async function ExpensesPage({
         </div>
       </div>
 
-      {/* 요약 */}
+      {/* 요약 — 정산·제출이 모두 회차 단위이므로 회차 전체를 주 숫자로 둔다.
+          종전엔 조회 월 금액만 크게 떠서, 회차 기준인 제출 배너·정산 화면과 숫자가
+          달라 보였다("왜 다르지?" — 테스터 지적). 이 달 값은 부제로 함께 적는다. */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">이 달 입력액</p>
-          <p className="mt-1 text-lg font-bold text-gray-900">{totalAmount.toLocaleString()}원</p>
-          <p className="text-xs text-gray-400">{expenses.length}건</p>
+        <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+          <p className="text-xs text-gray-500">
+            {round ? `${round.no}회차 전체 입력액` : '이 달 입력액'}
+          </p>
+          <p className="mt-1 text-lg font-bold text-gray-900">
+            {(round ? round.totalAmount : totalAmount).toLocaleString()}원
+          </p>
+          <p className="text-xs text-gray-400">
+            {round
+              ? `${round.totalCount}건 · 이 달(${ym.replace('-', '.')}) ${totalAmount.toLocaleString()}원 · ${expenses.length}건`
+              : `${expenses.length}건`}
+          </p>
         </div>
         <div className="rounded-xl border border-green-200 bg-green-50 p-4">
           <p className="text-xs text-gray-500">승인 금액</p>

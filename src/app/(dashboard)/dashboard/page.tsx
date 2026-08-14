@@ -317,8 +317,8 @@ export default async function DashboardPage() {
             >
               <ClipboardList className="h-6 w-6" />
               <div>
-                <p className="font-semibold">월별 내역 조회</p>
-                <p className="text-xs text-gray-400">수정·삭제·제출</p>
+                <p className="font-semibold">본사 제출</p>
+                <p className="text-xs text-gray-400">월별 내역 확인 · 회차 전체 제출</p>
               </div>
             </Link>
           </div>

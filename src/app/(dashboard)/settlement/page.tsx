@@ -384,7 +384,7 @@ export default async function StaffSettlementPage({
               📮 임시저장 {unsubmittedCount}건 · <b>{formatKRW(unsubmittedAmount)}</b>이 아직 본사에 제출되지 않았습니다 —
               위 금회사용·금회기성 금액은 <b>제출분만</b> 집계하므로 이 금액은 빠져 있고, 이대로 회차를 확정하면
               이번 정산서에서 누락됩니다.{' '}
-              <Link href="/expenses" className="font-semibold underline hover:text-amber-900">입력 내역·제출로 이동</Link>
+              <Link href="/expenses" className="font-semibold underline hover:text-amber-900">본사 제출로 이동</Link>
             </div>
           )}
           {budgetRemainAfter > 0 && (

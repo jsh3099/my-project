@@ -897,7 +897,7 @@ export function SiteExpenseBoard({
       <div className="flex gap-3 pt-1">
         <button type="button" onClick={() => router.push('/expenses')}
           className="flex-1 rounded-lg border border-gray-300 bg-white py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-          입력 내역 목록으로
+          본사 제출로
         </button>
         <button type="button" onClick={saveAll} disabled={isPending || dirty.size === 0}
           className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">

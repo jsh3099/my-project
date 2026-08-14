@@ -30,8 +30,13 @@ const staffMenus: Menu[] = [
   { href: '/expenses/staff-costs/support', icon: UsersRound, label: '기술지원 출장비' },
   { href: '/expenses/new', icon: PlusCircle, label: '현장경비 입력' },
   { href: '/attendance', icon: CalendarCheck, label: '출근부' },
-  { href: '/expenses', icon: Send, label: '입력 내역·제출', exact: true },
-  { href: '/settlement', icon: ListOrdered, label: '기성회차 정산' },
+  // 이 화면을 거치지 않으면 입력분이 정산에 편입되지 않는다(제출분만 집계) — 흐름의 관문이라
+  // 행위를 이름으로 쓴다. 월별 내역 확인 기능은 화면 부제가 설명한다.
+  { href: '/expenses', icon: Send, label: '본사 제출', exact: true },
+  // 화면 제목(H1)과 같은 말을 쓴다 — 이 화면에는 확정 버튼이 없다(회차 확정은 본사담당자
+  // 화면의 권한). 현장직원이 하는 일은 계상금액 등록·채움 현황 확인·정산서 받기이므로,
+  // 「정산」이라고 적으면 확정까지 하는 화면으로 읽힌다.
+  { href: '/settlement', icon: ListOrdered, label: '기성회차 현황' },
 ]
 
 const hqMenus: Menu[] = [
