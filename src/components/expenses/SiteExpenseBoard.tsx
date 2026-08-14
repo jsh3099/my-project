@@ -802,6 +802,23 @@ export function SiteExpenseBoard({
 
   const addedSubs = new Set(cards.map((c) => c.subcategory))
 
+  // 카드 순서 = 정산서 비목 순서. 종전엔 영수증을 붙인 순서(추가순)라
+  // 사무용품비 → 인쇄·제본 → 복리후생비처럼 비목이 뒤섞여 보였다 — 정산서 3.1이
+  // 비목 → 세부항목 순으로 묶이므로 화면도 같은 순서로 읽히게 한다(피커 탭 순서와도 일치).
+  // 한 세부항목에 인원이 여럿인 경우(manual_person)는 이름순.
+  const CATEGORY_ORDER = Object.values(EXPENSE_CATEGORIES) as ExpenseCategory[]
+  const orderOf = (c: CardState): [number, number, string] => {
+    const ci = CATEGORY_ORDER.indexOf(c.category)
+    const si = (EXPENSE_SUBCATEGORIES[c.category] ?? []).findIndex((s) => s.value === c.subcategory)
+    const name = staff.find((u) => u.id === c.targetUserId)?.full_name ?? ''
+    return [ci < 0 ? 99 : ci, si < 0 ? 99 : si, name]
+  }
+  const sortedCards = [...cards].sort((a, b) => {
+    const [ac, as_, an] = orderOf(a)
+    const [bc, bs, bn] = orderOf(b)
+    return ac - bc || as_ - bs || an.localeCompare(bn, 'ko')
+  })
+
   return (
     <div className="space-y-4">
       {/* 컨텍스트 바 */}
@@ -824,7 +841,7 @@ export function SiteExpenseBoard({
       )}
 
       <div className="space-y-3">
-        {cards.map((c) => renderCard(c))}
+        {sortedCards.map((c) => renderCard(c))}
         {cards.length === 0 && (
           <p className="rounded-xl border border-dashed border-gray-300 px-4 py-6 text-center text-sm text-gray-400">
             입력된 항목이 없습니다. 아래에서 항목을 추가하세요.

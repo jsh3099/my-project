@@ -88,7 +88,10 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft, round = nul
                     : '작성중인 항목을 본사에 제출합니다.'}
                 </p>
               </div>
+              {/* type을 명시한다 — 없으면 암묵적 submit이라 나중에 form 안으로 옮길 때
+                  의도치 않게 폼이 제출된다. 이 파일만 빠져 있었다(코드베이스 나머지는 전부 명시). */}
               <button
+                type="button"
                 onClick={() => setSubmitConfirm(true)}
                 className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
               >
@@ -104,10 +107,12 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft, round = nul
               <p className="text-xs text-blue-600">제출 후에는 수정이 불가합니다.</p>
               <div className="flex gap-2">
                 <button
+                  type="button"
                   onClick={() => setSubmitConfirm(false)}
                   className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                 >취소</button>
                 <button
+                  type="button"
                   onClick={handleSubmit}
                   disabled={isPending}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
