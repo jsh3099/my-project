@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -86,6 +87,8 @@ export default async function StaffSettlementPage({
 
   // 진행 중인 회차의 잠정 사용액 (현장 전체 인원 합계 — admin client로 본인 제출건 외에도 조회)
   const usedByCategory = new Map<string, number>()
+  let unsubmittedCount = 0
+  let unsubmittedAmount = 0
   if (openRound) {
     const admin = createAdminClient()
     const { data: previewExpenses } = await admin
@@ -100,6 +103,24 @@ export default async function StaffSettlementPage({
     for (const e of previewExpenses ?? []) {
       usedByCategory.set(e.category, (usedByCategory.get(e.category) ?? 0) + (e.amount - e.over_limit_amount))
     }
+
+    // 미제출 임시저장분 — 위 집계는 제출분(submitted·approved)만 센다. 확정 시 편입 기준이
+    // 그렇기 때문인데, 그 결과 회차 전부를 입력해 두고 제출만 안 한 상태에서 이 화면이
+    // 「금회사용 0원 · 미충당 전액」으로 보인다(실측: 입력 14,429,115원 / 화면 0원).
+    // 실제로 필요한 행동은 '입력'이 아니라 '제출'인데 아래 미충당 경고는 그걸 짚지 못하고,
+    // 같은 화면의 잠정 정산서는 임시저장분까지 담아 나가 숫자가 서로 어긋나 보인다.
+    // 집계 기준은 그대로 두고, 미제출분이 있으면 금액·건수와 함께 제출 경로를 알린다.
+    const { data: draftRows } = await admin
+      .from('expenses')
+      .select('amount, over_limit_amount')
+      .eq('site_id', siteId)
+      .eq('status', 'draft')
+      .is('settlement_round_id', null)
+      .is('deleted_at', null)
+      .gte('expense_date', openRound.period_start)
+      .lte('expense_date', openRound.period_end)
+    unsubmittedCount = (draftRows ?? []).length
+    unsubmittedAmount = (draftRows ?? []).reduce((s, e) => s + (e.amount - e.over_limit_amount), 0)
   }
 
   // 청구액 산정: 청구 = min(사용액, 계상총액 잔액), 항목 초과는 총액 내 흡수
@@ -355,6 +376,17 @@ export default async function StaffSettlementPage({
               <span>{remainingLabel(budgetRemainAfter, formatKRW).text}</span>
             </div>
           </div>
+          {/* 미제출 임시저장 안내 — 위 금액들은 제출분만 센다. 입력을 다 해 두고 제출만 안 한
+              상태에서 「0원·미충당 전액」으로 보이면 필요한 행동(제출)을 놓친다. 미충당 경고보다
+              먼저 띄운다 — 여기서 제출하면 아래 경고 자체가 사라지는 경우가 대부분이다. */}
+          {unsubmittedCount > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+              📮 임시저장 {unsubmittedCount}건 · <b>{formatKRW(unsubmittedAmount)}</b>이 아직 본사에 제출되지 않았습니다 —
+              위 금회사용·금회기성 금액은 <b>제출분만</b> 집계하므로 이 금액은 빠져 있고, 이대로 회차를 확정하면
+              이번 정산서에서 누락됩니다.{' '}
+              <Link href="/expenses" className="font-semibold underline hover:text-amber-900">입력 내역·제출로 이동</Link>
+            </div>
+          )}
           {budgetRemainAfter > 0 && (
             <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
               ⚠ 미충당 계상액 {formatKRW(budgetRemainAfter)}이 남아있습니다 — 계약기간 내 증빙으로 채우지 못하면

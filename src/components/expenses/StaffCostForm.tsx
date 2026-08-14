@@ -231,19 +231,26 @@ function ReceiptPanel({ savedByCategory, onAdd, onRemoveSaved, uploading, maxFil
     (savedByCategory[CATEGORY_TO_SUBCATEGORY[cat]] ?? []).map((url) => ({ cat, url })),
   )
 
+  // 용량 초과로 걸러진 파일 안내 — `alert()`은 미리보기 패널 등 일부 환경에서 아예 뜨지
+  // 않아(같은 이유로 `window.confirm`을 전부 걷어냈다) 파일이 조용히 무시된 것처럼 보였다.
+  // 화면 안 문구로 남겨 무엇이 왜 빠졌는지 저장 전에 읽히게 한다.
+  const [sizeWarn, setSizeWarn] = useState<string[]>([])
+
   function addFiles(incoming: FileList | null) {
     if (!incoming) return
     const room = maxFiles - saved.length
     const valid: { file: File; category: ReceiptCategory }[] = []
+    const tooBig: string[] = []
     for (const f of Array.from(incoming)) {
       if (valid.length >= room) break
-      if (f.size > MAX_SIZE) { alert(`${f.name}: 파일 크기는 10MB 이하만 가능합니다.`); continue }
+      if (f.size > MAX_SIZE) { tooBig.push(f.name); continue }
       // 파일명에서 비목이 읽히면 그것을, 아니면 위에서 선택한 비목을 쓴다.
       // 이 사람에게 해당 없는 비목으로 읽혔으면 무시하고 선택한 비목에 붙인다
       const detected = detectCategory(f.name)
       const category = detected && !disabledCategories.includes(detected) ? detected : selectedCategory
       valid.push({ file: f, category })
     }
+    setSizeWarn(tooBig)
     // 비목별로 묶어 한 번씩 업로드
     for (const cat of RECEIPT_CATEGORIES) {
       const group = valid.filter((v) => v.category === cat).map((v) => v.file)
@@ -330,6 +337,15 @@ function ReceiptPanel({ savedByCategory, onAdd, onRemoveSaved, uploading, maxFil
           {notice.kind === 'ok' ? '✓ ' : '⚠ '}
           {notice.text}
         </p>
+      )}
+      {sizeWarn.length > 0 && (
+        <div className="flex items-start gap-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
+          <span className="min-w-0 flex-1">
+            ⚠ 10MB를 넘어 첨부되지 않았습니다 — {sizeWarn.join(', ')} · 파일을 줄이거나 나눠서 올려주세요.
+          </span>
+          <button type="button" onClick={() => setSizeWarn([])} aria-label="안내 닫기"
+            className="text-amber-400 hover:text-amber-700">✕</button>
+        </div>
       )}
       <p className="text-xs text-gray-400">첨부는 올리는 즉시 저장됩니다 · 최대 {maxFiles}개 · JPG·PNG·PDF · 10MB 이하 · 파일명에 항목(숙소비·관리비 등)이 있으면 자동 분류 · 이체확인증·관리비 PDF는 금액 자동 인식</p>
 

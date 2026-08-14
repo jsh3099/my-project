@@ -133,6 +133,36 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
     new Set(members.map((m) => `m_${m.id}`))
   )
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({})
+  // 용량 초과로 첨부되지 않은 파일명 (인원별) — 아래 onChange 주석 참고
+  const [sizeWarn, setSizeWarn] = useState<Record<string, string>>({})
+
+  // ── 저장 상태 칩 (저장됨 / 확인 필요 / 미입력) ────────────────────────────
+  // 이 화면에만 상태 칩이 없어서, 소계 500,000원이 멀쩡히 떠 있는데 DB에는 한 건도
+  // 저장되지 않은 상태를 화면만 보고는 알 수 없었다(실측: business_trip 행 0건).
+  // 저장하지 않은 채 회차를 확정하면 그 금액이 통째로 빠진다.
+  //
+  // setRows 호출 지점이 많아 dirty 플래그를 곳곳에 심는 대신, 마운트 시점의 서명을
+  // 기억해 두고 현재 행과 비교하는 파생값으로 판정한다(상태 복사가 없어 effect도 불필요).
+  const rowSignature = (r: PersonRow) => JSON.stringify([
+    r.distanceOneway, r.fuelType,
+    r.visits.map((v) => [v.date, v.fuelPrice, v.fuelPriceDate, v.toll]),
+  ])
+  // 저장된 draft가 있는 인원 — 없으면 화면 값이 아직 DB에 없다는 뜻 (prop 파생)
+  const savedNames = new Set(existingDrafts?.map((d) => d.identity) ?? [])
+  // 마운트 시점 서명 — 저장 후 재진입하면 서버 draft로 다시 만들어진다.
+  // ref가 아니라 state로 두는 건 렌더 중에 읽기 때문(react-hooks/refs)
+  const [initialSig] = useState(() => new Map(rows.map((r) => [r.id, rowSignature(r)])))
+
+  function rowStatus(r: PersonRow, total: number): 'saved' | 'pending' | 'empty' {
+    if (total <= 0) return 'empty'
+    if (!savedNames.has(r.name)) return 'pending'
+    return initialSig.get(r.id) === rowSignature(r) ? 'saved' : 'pending'
+  }
+  const STATUS_CHIP: Record<'saved' | 'pending' | 'empty', [string, string]> = {
+    saved: ['bg-green-50 text-green-700', '✓ 저장됨'],
+    pending: ['bg-amber-50 text-amber-700', '확인 필요'],
+    empty: ['bg-gray-100 text-gray-400', '미입력'],
+  }
 
   // 교통비 산출 시트 — 상주 주재비의 '자차 왕복비 산출'과 같은 우측 시트.
   // 카드에는 비목(교통비·일비·식비) 합계만 보이고, 방문일·유가·통행료 상세는 여기서 다룬다.
@@ -417,11 +447,14 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
     return <span className="whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">유가 확인</span>
   }
 
+  const pendingCount = rows.filter((r) => rowStatus(r, rowTotal(r)) === 'pending').length
+
   // 카드도 주재비와 같은 이유로 렌더 함수 호출 방식 (JSX 태그로 쓰면 렌더마다 리마운트)
   function renderCard(r: PersonRow) {
     const total = rowTotal(r)
     const isOpen = openRows.has(r.id)
     const visitCount = r.visits.filter((v) => v.date).length
+    const status = rowStatus(r, total)
 
     // ── 비목 요약 (교통비 / 일비 / 식비) ──
     // 정산기준·예본 2-1이 출장비를 이 세 항목으로 정의하는데, 방문일 표만으로는
@@ -469,6 +502,9 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
           {attendanceLinked.has(r.id) && (
             <span className="whitespace-nowrap rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-semibold text-green-700">출근부 연동</span>
           )}
+          <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_CHIP[status][0]}`}>
+            {STATUS_CHIP[status][1]}
+          </span>
           <div className="ml-auto flex items-center gap-2.5">
             <div className="text-right">
               <div className="text-[15px] font-bold text-gray-900">{total > 0 ? `${total.toLocaleString()}원` : '—'}</div>
@@ -541,7 +577,14 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
               <input ref={(el) => { fileInputs.current[r.id] = el }} type="file" accept={ACCEPT} className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0] ?? null
-                  if (f && f.size > MAX_SIZE) { alert('10MB 이하만 가능합니다.'); return }
+                  // alert()은 미리보기 패널 등 일부 환경에서 뜨지 않아 파일이 조용히 무시된 것처럼
+                  // 보인다(같은 이유로 window.confirm을 전부 걷어냈다) — 화면 안 문구로 남긴다
+                  if (f && f.size > MAX_SIZE) {
+                    setSizeWarn((p) => ({ ...p, [r.id]: f.name }))
+                    e.target.value = ''
+                    return
+                  }
+                  setSizeWarn((p) => { const n = { ...p }; delete n[r.id]; return n })
                   patchRow(r.id, { mapFile: f })
                 }} />
               {/* 저장된 캡처 복원 — 새 파일을 고르면 저장 시 교체된다 */}
@@ -567,6 +610,13 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
                 {r.savedReceiptUrls.length === 0 && !r.mapFile ? '캡처 첨부 (카카오맵 등)' : '교체'}
               </button>
               {visitCount === 0 && <span className="text-xs text-gray-400">출근부에 방문일을 전기하면 자동으로 채워집니다</span>}
+              {sizeWarn[r.id] && (
+                <span className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                  ⚠ 10MB를 넘어 첨부되지 않았습니다 — {sizeWarn[r.id]}
+                  <button type="button" onClick={() => setSizeWarn((p) => { const n = { ...p }; delete n[r.id]; return n })}
+                    aria-label="안내 닫기" className="text-amber-400 hover:text-amber-700">✕</button>
+                </span>
+              )}
             </div>
           </>
         )}
@@ -624,7 +674,8 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
         </button>
         <button type="button" onClick={handleSave} disabled={isPending || success}
           className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-          {isPending ? '저장 중...' : '전체 임시저장'}
+          {/* 미저장 건수를 버튼에 실어 둔다 — 카드 칩을 못 보고 지나쳐도 여기서 한 번 더 걸린다 */}
+          {isPending ? '저장 중...' : pendingCount > 0 ? `전체 임시저장 (${pendingCount}명 미저장)` : '전체 임시저장'}
         </button>
       </div>
 
