@@ -1,0 +1,341 @@
+<title>대시보드 개편 목업</title>
+<style>
+  :root {
+    --bg: #F6F7F9; --surface: #FFFFFF; --surface-2: #EEF1F5;
+    --ink: #1B2330; --ink-2: #5A6577; --ink-3: #98A2B3; --line: #E2E6EC;
+    --primary: #2563EB; --primary-soft: #EAF0FE;
+    --resident: #7C3AED; --resident-soft: #F1EAFD;
+    --support: #0F766E; --support-soft: #E2F3F1;
+    --printing: #B45309; --printing-soft: #FCF1E3;
+    --ok: #15803D; --ok-soft: #E7F5EC;
+    --bad: #B42318; --bad-soft: #FDEBE9;
+    --idle: #D7DCE4;
+    --shadow: 0 1px 2px rgba(20,28,45,.06), 0 4px 16px rgba(20,28,45,.07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #13161C; --surface: #1B2029; --surface-2: #232935;
+      --ink: #E6EAF1; --ink-2: #9AA5B8; --ink-3: #66718A; --line: #2C3442;
+      --primary: #5B8DF6; --primary-soft: #1D2A45;
+      --resident: #A78BFA; --resident-soft: #2B2344;
+      --support: #4CC1B5; --support-soft: #14302D;
+      --printing: #F0A860; --printing-soft: #382711;
+      --ok: #4ADE80; --ok-soft: #16301F;
+      --bad: #F87171; --bad-soft: #3A1B1B;
+      --idle: #38414F;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #13161C; --surface: #1B2029; --surface-2: #232935;
+    --ink: #E6EAF1; --ink-2: #9AA5B8; --ink-3: #66718A; --line: #2C3442;
+    --primary: #5B8DF6; --primary-soft: #1D2A45;
+    --resident: #A78BFA; --resident-soft: #2B2344;
+    --support: #4CC1B5; --support-soft: #14302D;
+    --printing: #F0A860; --printing-soft: #382711;
+    --ok: #4ADE80; --ok-soft: #16301F;
+    --bad: #F87171; --bad-soft: #3A1B1B;
+    --idle: #38414F;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", sans-serif;
+    font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 24px 20px 56px; display: grid; gap: 16px; }
+
+  .note {
+    border-left: 3px solid var(--primary); background: var(--primary-soft);
+    padding: 10px 14px; border-radius: 0 8px 8px 0; font-size: 12.5px; color: var(--ink-2);
+  }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+  .card-h {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    padding: 14px 18px; border-bottom: 1px solid var(--line);
+  }
+  .card-h h2 { margin: 0; font-size: 13.5px; letter-spacing: .01em; }
+  .card-h .sub { font-size: 12px; color: var(--ink-3); }
+  .card-b { padding: 16px 18px; }
+
+  /* ── 헤더 ─────────────────────────────────────── */
+  .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .site-pick {
+    display: inline-flex; align-items: center; gap: 8px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; box-shadow: var(--shadow);
+  }
+  .site-pick select {
+    border: none; background: transparent; color: var(--ink); font: inherit; font-weight: 700; font-size: 15px;
+  }
+  .contract { font-size: 12.5px; color: var(--ink-2); }
+  .contract b { color: var(--ink); }
+
+  /* ── KPI 4장 ──────────────────────────────────── */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 780px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+  .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
+  .kpi .lab { font-size: 11.5px; color: var(--ink-3); letter-spacing: .02em; }
+  .kpi .val { font-size: 21px; font-weight: 800; margin-top: 4px; letter-spacing: -.01em; }
+  .kpi .sub { font-size: 11.5px; color: var(--ink-2); margin-top: 3px; }
+  .kpi.accent { border-color: color-mix(in srgb, var(--primary) 35%, var(--line)); background: var(--primary-soft); }
+  .kpi.accent .val { color: var(--primary); }
+  .kpi.risk .val { color: var(--bad); }
+
+  /* ── 타임라인 ─────────────────────────────────── */
+  .tl-bar { display: flex; height: 46px; border-radius: 9px; overflow: hidden; border: 1px solid var(--line); }
+  .seg { position: relative; display: grid; place-content: center; gap: 1px; color: #fff; font-size: 11.5px; text-align: center; }
+  .seg b { font-size: 12px; font-weight: 800; }
+  .seg .amt { font-size: 10.5px; opacity: .9; }
+  .seg.done { background: var(--primary); }
+  .seg.done:nth-child(even) { background: color-mix(in srgb, var(--primary) 84%, #000); }
+  .seg.now {
+    background: repeating-linear-gradient(135deg, var(--ok) 0 9px, color-mix(in srgb, var(--ok) 80%, #000) 9px 18px);
+    outline: 2px solid var(--ok); outline-offset: -2px;
+  }
+  .seg.idle { background: var(--idle); color: var(--ink-2); }
+  .tl-axis { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-3); margin-top: 6px; }
+  .tl-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--ink-2); margin-top: 10px; }
+  .tl-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+  /* ── 표 ───────────────────────────────────────── */
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 640px; }
+  th, td { padding: 9px 10px; text-align: right; white-space: nowrap; }
+  th { font-size: 11.5px; color: var(--ink-3); font-weight: 600; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+  tbody tr { border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+  tbody tr.now { background: var(--ok-soft); }
+  tfoot td { border-top: 1px solid var(--line); font-weight: 800; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .pill.done { background: var(--surface-2); color: var(--ink-2); }
+  .pill.now { background: var(--ok-soft); color: var(--ok); }
+
+  /* ── 진행 회차 ────────────────────────────────── */
+  .now-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; }
+  @media (max-width: 780px) { .now-grid { grid-template-columns: 1fr; } }
+  .facts { display: grid; gap: 8px; align-content: start; }
+  .fact { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding-bottom: 7px; border-bottom: 1px dashed var(--line); }
+  .fact:last-child { border-bottom: none; }
+  .fact .k { color: var(--ink-2); }
+  .fact .v { font-weight: 700; }
+  .fact .v.bad { color: var(--bad); }
+
+  .fills { display: grid; gap: 13px; align-content: start; }
+  .fill .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12.5px; margin-bottom: 5px; }
+  .fill .name { font-weight: 700; }
+  .fill .meta { color: var(--ink-2); font-size: 11.5px; }
+  .track { height: 9px; border-radius: 999px; background: var(--surface-2); overflow: hidden; position: relative; }
+  .fillbar { height: 100%; border-radius: 999px; }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .tag.ok { background: var(--ok-soft); color: var(--ok); }
+  .tag.bad { background: var(--bad-soft); color: var(--bad); }
+
+  .callout {
+    margin-top: 14px; border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line));
+    background: var(--bad-soft); color: var(--bad); border-radius: 10px; padding: 11px 14px; font-size: 12.5px;
+  }
+  .callout b { font-weight: 800; }
+
+  .foot { font-size: 12px; color: var(--ink-3); }
+  details.addr { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+  details.addr summary { padding: 12px 18px; cursor: pointer; font-size: 13px; font-weight: 700; }
+  details.addr .card-b { border-top: 1px solid var(--line); }
+  :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+
+  <div class="note">
+    <b>대시보드 개편 목업</b> — 현재 화면은 「이번 달 · 본인」 기준이라 회차·현장 단위인 나머지 화면과 숫자가 어긋나고,
+    배정된 현장을 모두 합산해 한 현장의 초과가 다른 현장의 미충당을 가립니다.
+    이 목업은 <b>현장 하나를 골라, 계약 전체를 시간축과 금액축으로 한 번에</b> 보여주는 안입니다.
+    숫자는 「도매시장 5회차」 실제 값입니다.
+  </div>
+
+  <div class="top">
+    <span class="site-pick">
+      <span class="lab" style="font-size:11.5px;color:var(--ink-3)">현장</span>
+      <select aria-label="현장 선택">
+        <option>도매시장 5회차</option>
+        <option>청주 농수산물 도매시장 시설현대화</option>
+      </select>
+    </span>
+    <span class="contract">
+      총 용역기간 <b class="num">2025-06-01 ~ 2026-12-31</b> (19개월) · 직접경비 계상총액 <b class="num">180,000,000원</b>
+    </span>
+  </div>
+
+  <!-- ── 계약 소진 현황 ── -->
+  <div class="kpis">
+    <div class="kpi">
+      <div class="lab">직접경비 계상총액</div>
+      <div class="val num">180,000,000</div>
+      <div class="sub">계약 전체</div>
+    </div>
+    <div class="kpi">
+      <div class="lab">누계 기성</div>
+      <div class="val num">163,200,000</div>
+      <div class="sub">4회 확정 · 계상의 90.7%</div>
+    </div>
+    <div class="kpi accent">
+      <div class="lab">금회 계상 <span style="color:var(--ink-3);font-weight:400">(5회차)</span></div>
+      <div class="val num">16,800,000</div>
+      <div class="sub">이번 회차에 증빙으로 채워야 할 금액</div>
+    </div>
+    <div class="kpi">
+      <div class="lab">잔여 정산금액</div>
+      <div class="val num">0</div>
+      <div class="sub">1.8억 − 누계 1.632억 − 금회 0.168억 · <b>5회차가 마지막 회차</b></div>
+    </div>
+  </div>
+
+  <!-- ── 회차 타임라인 ── -->
+  <section class="card">
+    <div class="card-h">
+      <h2>회차 타임라인</h2>
+      <span class="sub">
+        계약 종료까지 <b style="color:var(--ink)">4개월 17일</b> · 금회 회차 종료까지 <b style="color:var(--ink)">17일</b>
+      </span>
+    </div>
+    <div class="card-b">
+      <div class="tl-bar">
+        <div class="seg done" style="flex:61" title="1회차 2025-06-01~07-31">
+          <b>1회차</b><span class="amt num">4,080만</span>
+        </div>
+        <div class="seg done" style="flex:61" title="2회차 2025-08-01~09-30">
+          <b>2회차</b><span class="amt num">4,080만</span>
+        </div>
+        <div class="seg done" style="flex:61" title="3회차 2025-10-01~11-30">
+          <b>3회차</b><span class="amt num">4,080만</span>
+        </div>
+        <div class="seg done" style="flex:121" title="4회차 2025-12-01~2026-03-31">
+          <b>4회차</b><span class="amt num">4,080만</span>
+        </div>
+        <div class="seg now" style="flex:153" title="5회차 2026-04-01~08-31 진행 중">
+          <b>5회차 진행중</b><span class="amt num">1,524 / 1,680만</span>
+        </div>
+        <div class="seg idle" style="flex:122" title="회차 미개시 구간">
+          <b>미개시</b><span class="amt">4개월</span>
+        </div>
+      </div>
+      <div class="tl-axis"><span class="num">2025-06-01</span><span class="num">오늘 2026-08-14</span><span class="num">2026-12-31</span></div>
+      <div class="tl-legend">
+        <span><i class="sw" style="background:var(--primary)"></i>확정 회차</span>
+        <span><i class="sw" style="background:var(--ok)"></i>진행 중</span>
+        <span><i class="sw" style="background:var(--idle)"></i>회차가 아직 잡히지 않은 구간</span>
+      </div>
+      <p class="foot" style="margin:12px 0 0">
+        계약은 2026-12-31까지인데 5회차가 08-31에 끝납니다 — <b>9~12월 4개월이 비어 있습니다.</b>
+        그런데 위 「잔여 정산금액」은 <b>0원</b>입니다. <b>기간은 남았지만 계상은 다 배정됐다</b>는 뜻이라,
+        6회차를 만들려면 설계변경으로 계상을 늘려야 하고 그렇지 않으면 5회차가 마지막입니다.
+        지금 화면에서는 어느 쪽도 보이지 않습니다.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── 차수별 정산 내역 ── -->
+  <section class="card">
+    <div class="card-h">
+      <h2>차수별 정산 내역</h2>
+      <span class="sub">확정 4회 + 진행 1회</span>
+    </div>
+    <div class="card-b">
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>회차</th><th>정산기간</th><th>금회 계상</th><th>금회 기성</th><th>누계 기성</th><th>잔액</th><th>상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>1회차</td><td class="num">2025-06-01 ~ 07-31</td><td class="num">40,800,000</td><td class="num">40,800,000</td><td class="num">40,800,000</td><td class="num">139,200,000</td><td><span class="pill done">확정</span></td></tr>
+            <tr><td>2회차</td><td class="num">2025-08-01 ~ 09-30</td><td class="num">40,800,000</td><td class="num">40,800,000</td><td class="num">81,600,000</td><td class="num">98,400,000</td><td><span class="pill done">확정</span></td></tr>
+            <tr><td>3회차</td><td class="num">2025-10-01 ~ 11-30</td><td class="num">40,800,000</td><td class="num">40,800,000</td><td class="num">122,400,000</td><td class="num">57,600,000</td><td><span class="pill done">확정</span></td></tr>
+            <tr><td>4회차</td><td class="num">2025-12-01 ~ 2026-03-31</td><td class="num">40,800,000</td><td class="num">40,800,000</td><td class="num">163,200,000</td><td class="num">16,800,000</td><td><span class="pill done">확정</span></td></tr>
+            <tr class="now"><td>5회차</td><td class="num">2026-04-01 ~ 08-31</td><td class="num">16,800,000</td><td class="num">15,240,745</td><td class="num">178,440,745</td><td class="num">1,559,255</td><td><span class="pill now">진행 중</span></td></tr>
+          </tbody>
+          <tfoot>
+            <tr><td colspan="3">합계</td><td class="num">178,440,745</td><td></td><td class="num">1,559,255</td><td></td></tr>
+          </tfoot>
+        </table>
+      </div>
+      <p class="foot" style="margin:10px 0 0">
+        5회차 금액은 제출분 기준 잠정값입니다 — 확정 시 스냅샷으로 고정됩니다.
+        「금회 계상」은 산출내역서에서 받아 적는 값이고 「잔액」은 계상총액에서 누계를 뺀 자동 계산값이라,
+        회차마다 두 값이 다릅니다(4회차: 금회 계상 4,080만 · 그 시점 잔액 5,760만).
+      </p>
+    </div>
+  </section>
+
+  <!-- ── 진행 중 회차 ── -->
+  <section class="card">
+    <div class="card-h">
+      <h2>진행 중 5회차</h2>
+      <span class="sub">2026-04-01 ~ 2026-08-31 · 종료까지 17일</span>
+    </div>
+    <div class="card-b">
+      <div class="now-grid">
+        <div class="facts">
+          <div class="fact"><span class="k">금회 계상금액</span><span class="v num">16,800,000원</span></div>
+          <div class="fact"><span class="k">금회 사용액 (제출분)</span><span class="v num">15,240,745원</span></div>
+          <div class="fact"><span class="k">금회 기성금액 (잠정)</span><span class="v num">15,240,745원</span></div>
+          <div class="fact"><span class="k">미충당 — 삭감 예상</span><span class="v bad num">1,559,255원</span></div>
+          <div class="fact"><span class="k">제출 상태</span><span class="v">23건 전부 제출 · 본사 검토 중</span></div>
+        </div>
+
+        <div class="fills">
+          <div class="fill">
+            <div class="row">
+              <span class="name">현장주재비</span>
+              <span class="meta num">14,279,115 / 14,000,000 <span class="tag ok">충족 100%</span></span>
+            </div>
+            <div class="track"><div class="fillbar" style="width:100%;background:var(--resident)"></div></div>
+            <div class="meta num" style="margin-top:4px">초과 279,115원 — 총액 내 흡수</div>
+          </div>
+          <div class="fill">
+            <div class="row">
+              <span class="name">출장비</span>
+              <span class="meta num">811,630 / 600,000 <span class="tag ok">충족 101%</span></span>
+            </div>
+            <div class="track"><div class="fillbar" style="width:100%;background:var(--support)"></div></div>
+            <div class="meta num" style="margin-top:4px">초과 211,630원 — 총액 내 흡수</div>
+          </div>
+          <div class="fill">
+            <div class="row">
+              <span class="name">도서인쇄비</span>
+              <span class="meta num">150,000 / 2,200,000 <span class="tag bad">32%</span></span>
+            </div>
+            <div class="track"><div class="fillbar" style="width:32%;background:var(--printing)"></div></div>
+            <div class="meta num" style="margin-top:4px">미충당 2,050,000원 — 증빙이 없으면 삭감</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout">
+        금회 계상금액 16,800,000원 중 증빙으로 채우지 못한 <b class="num">1,559,255원이 삭감 후 지급될 예정</b>입니다.
+        주재비·출장비 초과분 490,745원이 도서인쇄비 부족분을 총액 안에서 흡수하고, 나머지가 깎입니다.
+      </div>
+    </div>
+  </section>
+
+  <details class="addr">
+    <summary>현장 정보 — 주소 · 계약 (교통비·출장비 산출에 사용)</summary>
+    <div class="card-b">
+      <div class="fact"><span class="k">현장주소</span><span class="v">청주시 흥덕구 옥산면 오산리 606-8번지</span></div>
+      <div class="fact"><span class="k">계약기간</span><span class="v num">2025-06-01 ~ 2026-12-31</span></div>
+      <p class="foot" style="margin:10px 0 0">자주 바뀌지 않는 값이라 접어 둡니다 — 필요할 때만 펼쳐 수정합니다.</p>
+    </div>
+  </details>
+
+  <div class="note" style="border-left-color:var(--ink-3);background:var(--surface-2)">
+    <b>현재 화면에서 빠지는 것</b> — 「이번 달 총 사용액」(회차 값이 8월로 몰려 잡히던 숫자),
+    「예산」(두 현장 합계), 「비목별 사용 현황」(본인·이번 달 기준이라 위 블록과 기준이 달랐음),
+    「최근 입력 내역」(본사 제출 화면과 중복). 「한도 초과 건수」는 복리후생 한도 위반을 뜻해
+    <b>진행 회차 블록의 비목별 채움</b>으로 흡수됩니다.
+  </div>
+
+</div>

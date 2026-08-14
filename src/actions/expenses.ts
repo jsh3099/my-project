@@ -262,6 +262,25 @@ export async function createStaffCosts(formData: FormData) {
   const expenseDate = lastDayOfMonth(yearMonth)
   const base = { site_id: siteId, submitted_by: user.id, user_id: user.id, year: yr, month: mo, year_month: yearMonth, status: 'draft', is_over_limit: false, over_limit_amount: 0, expense_date: expenseDate, headcount: 1 }
 
+  // 제출된 뒤에는 저장을 막는다 — reconcile이 draft만 보므로, 제출분이 있는 상태에서
+  // 저장하면 그것과 별개의 draft가 새로 생겨 **같은 비용이 두 번 계상된다**
+  // (집계는 draft+submitted를 함께 센다). 제출 후 수정 불가라는 원칙과도 같은 방향이다.
+  const { data: sentRows } = await admin
+    .from('expenses')
+    .select('id')
+    .eq('site_id', siteId)
+    .eq('year', yr)
+    .eq('month', mo)
+    .is('settlement_round_id', null)
+    .in('status', ['submitted', 'approved'])
+    .in('category', ['site_residence', 'business_trip'])
+    .not('target_user_name', 'is', null)
+    .is('deleted_at', null)
+    .limit(1)
+  if ((sentRows ?? []).length > 0) {
+    return { error: '이미 본사에 제출된 내역입니다 — 수정하려면 본사에 반려를 요청하세요.' }
+  }
+
   // 이 화면에서 이전에 저장한 draft 항목을 조회 (전부 지우고 다시 넣는 대신, 행 단위로 비교해 갱신/삭제/신규를 가른다 —
   // 그래야 재저장 시 이미 첨부된 영수증이 날아가지 않는다)
   const { data: existingRows, error: fetchError } = await admin

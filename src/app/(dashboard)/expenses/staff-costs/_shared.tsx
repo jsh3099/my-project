@@ -127,16 +127,22 @@ export async function StaffCostsPageContent({
   }
   const members = (membersData ?? []) as SiteStaffMember[]
 
-  // 이미 저장한 draft 주재비 — 영수증을 올릴 때마다 저장해 나가는 흐름이라
+  // 이미 저장한 주재비 — 영수증을 올릴 때마다 저장해 나가는 흐름이라
   // 재진입 시 금액·건별 내역·첨부가 폼에 그대로 복원되어야 한다.
-  // (복원하지 않으면 빈 폼으로 「임시저장」했을 때 기존 draft가 지워진다)
+  // (복원하지 않으면 빈 폼으로 「임시저장」했을 때 기존 값이 지워진다)
+  //
+  // status로 거르지 않는다 — 종전엔 draft만 읽어서, 본사에 제출하는 순간(submitted)
+  // 화면이 통째로 「미입력」으로 보였다(교통비·임대비·관리비가 DB에 있는데도).
+  // 게다가 저장 reconcile도 draft만 보므로 그 상태에서 저장하면 제출분과 별개의
+  // draft가 새로 생겨 **같은 비용이 두 번 계상된다**(집계는 draft+submitted를 함께 센다).
+  // 회차에 편입된 것(settlement_round_id)은 확정분이라 제외한다.
   const { data: draftData } = await admin
     .from('expenses')
-    .select('subcategory, target_user_id, target_user_name, amount, period_start, period_end, receipt_urls, calc_detail, expense_items(item_date, tag, amount_gross, sort_order), commute_calcs(mode, home_address, distance_oneway_km, fuel_type, fuel_efficiency, fuel_price, fuel_price_date, toll_roundtrip, multiplier)')
+    .select('subcategory, target_user_id, target_user_name, amount, period_start, period_end, receipt_urls, calc_detail, status, expense_items(item_date, tag, amount_gross, sort_order), commute_calcs(mode, home_address, distance_oneway_km, fuel_type, fuel_efficiency, fuel_price, fuel_price_date, toll_roundtrip, multiplier)')
     .eq('site_id', siteId)
     .eq('year', parseInt(year, 10))
     .eq('month', month)
-    .eq('status', 'draft')
+    .is('settlement_round_id', null)
     .eq('category', 'site_residence')
     .not('target_user_name', 'is', null)
     .is('deleted_at', null)
@@ -206,16 +212,22 @@ export async function StaffCostsPageContent({
   // 기술지원 기술인은 주재비가 아닌 출장비(방문일별 산출)로 정산한다 — 정산서 2-1
   const isSupport = staffType === 'support'
 
+  // 제출된 내역이 있으면 이 달은 읽기 전용 — 저장하면 제출분과 별개의 draft가 생겨
+  // 중복 계상되므로 서버가 막는데, 화면에서도 미리 알린다(누른 뒤 실패 메시지를 보는 것보다 낫다)
+  const isSent = (s?: string) => s === 'submitted' || s === 'approved'
+  let submittedLocked = ((draftData ?? []) as { status?: string }[]).some((d) => isSent(d.status))
+
   // 이미 저장한 draft 출장비 — 주재비와 같은 이유로 재진입 시 거리·유가·통행료·첨부가 복원되어야 한다
   let supportDrafts: SupportTripDraft[] = []
   if (isSupport) {
+    // 주재비와 같은 이유로 status로 거르지 않는다 (위 주석 참고)
     const { data: tripData } = await admin
       .from('expenses')
-      .select('target_user_name, receipt_urls, calc_detail, trip_visits(visit_date, fuel_price, fuel_price_date, toll)')
+      .select('target_user_name, receipt_urls, calc_detail, status, trip_visits(visit_date, fuel_price, fuel_price_date, toll)')
       .eq('site_id', siteId)
       .eq('year', parseInt(year, 10))
       .eq('month', month)
-      .eq('status', 'draft')
+      .is('settlement_round_id', null)
       .eq('subcategory', 'support_trip')
       .not('target_user_name', 'is', null)
       .is('deleted_at', null)
@@ -225,6 +237,7 @@ export async function StaffCostsPageContent({
       calc_detail: { originAddress?: string | null; distanceOnewayKm?: number; fuelType?: string } | null
       trip_visits: { visit_date: string; fuel_price: number; fuel_price_date: string | null; toll: number }[] | null
     }
+    if (((tripData ?? []) as { status?: string }[]).some((d) => isSent(d.status))) submittedLocked = true
     supportDrafts = ((tripData ?? []) as unknown as TripRaw[]).map((d) => ({
       identity: d.target_user_name,
       originAddress: d.calc_detail?.originAddress ?? null,
@@ -279,6 +292,13 @@ export async function StaffCostsPageContent({
             </button>
           </div>
         </form>
+      )}
+
+      {submittedLocked && (
+        <div className="rounded-xl border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+          📮 이 달 내역은 <b>이미 본사에 제출</b>되어 검토 중입니다 — 저장된 값은 그대로 보이지만
+          수정·저장은 되지 않습니다. 고쳐야 하면 본사에 <b>반려</b>를 요청하세요.
+        </div>
       )}
 
       {isSupport ? (
