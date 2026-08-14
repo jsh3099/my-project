@@ -221,7 +221,7 @@ export function CommuteCalcPanel({ siteId, siteAddress, isOwnRow, defaultHomeAdd
             </div>
           )}
           <p className="mt-0.5 text-[11px] text-gray-400">
-            {siteAddress ? '대시보드 · 현장 정보에서 수정할 수 있습니다.' : '한 번 저장하면 대시보드 · 현장 정보에 남아 모든 산출에 자동 반영됩니다.'}
+            {siteAddress ? '현장 요약 · 현장 정보에서 수정할 수 있습니다.' : '한 번 저장하면 현장 요약 · 현장 정보에 남아 모든 산출에 자동 반영됩니다.'}
           </p>
         </div>
         <div>

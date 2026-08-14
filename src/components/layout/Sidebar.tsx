@@ -25,7 +25,9 @@ const adminMenus: Menu[] = [
 // 입력(주재비·출장비·현장경비·출근부) → 제출 → 정산 확인 순서로 배치.
 // 「본사 제출」 버튼이 /expenses 에만 있어 사이드바에 없으면 제출 단계를 찾지 못한다.
 const staffMenus: Menu[] = [
-  { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
+  // 「대시보드」는 무엇을 보는 화면인지 말해주지 않는다 — 이 화면은 현장 하나를
+  // 금액축·시간축으로 요약한다. 아래 「기성회차 현황」과 층위가 구분되도록 '요약'을 쓴다.
+  { href: '/dashboard', icon: LayoutDashboard, label: '현장 요약' },
   { href: '/expenses/staff-costs/resident', icon: UsersRound, label: '상주기술인 주재비' },
   { href: '/expenses/staff-costs/support', icon: UsersRound, label: '기술지원 출장비' },
   { href: '/expenses/new', icon: PlusCircle, label: '현장경비 입력' },
@@ -40,7 +42,8 @@ const staffMenus: Menu[] = [
 ]
 
 const hqMenus: Menu[] = [
-  { href: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
+  // 본사담당자에겐 바로 아래 「전체 현황」이 있으므로 '현장별'을 붙여 범위를 구분한다
+  { href: '/dashboard', icon: LayoutDashboard, label: '현장별 요약' },
   { href: '/hq/overview', icon: FileText, label: '전체 현황' },
   { href: '/hq/review', icon: CheckSquare, label: '제출 검토' },
   { href: '/admin/sites', icon: Building2, label: '현장 관리' },

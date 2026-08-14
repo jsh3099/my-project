@@ -200,7 +200,10 @@ export default async function DashboardPage({
       {/* 헤더 — 현장 선택 + 계약 한 줄 */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">{profile?.full_name}님, 정산 현황입니다</h1>
+          {/* 사이드바 라벨(「현장 요약」)과 같은 말을 쓴다 — 메뉴와 화면 제목이 다르면 같은 화면인지 확신하지 못한다 */}
+          {/* 현장명은 낫표로 묶는다 — 「도매시장 5회차」처럼 이름에 회차가 든 현장이 있어
+              따옴표가 없으면 "5회차의 요약"으로 읽힌다(이 화면엔 실제 진행 회차가 따로 있다) */}
+          <h1 className="text-xl font-bold text-gray-900">{profile?.full_name}님, 「{site.name}」 현장 요약입니다</h1>
           <p className="mt-0.5 text-sm text-gray-500">
             {site.contract_start && site.contract_end && (
               <>총 용역기간 <b className="text-gray-700 tabular-nums">{site.contract_start} ~ {site.contract_end}</b>

@@ -250,7 +250,7 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
     const r = rows.find((x) => x.id === rowId)
     if (!r) return false
     if (!r.originAddress.trim()) { setError('자택주소를 먼저 입력하세요. (출근부 화면에서 거주지 증빙을 첨부하면 자동으로 채워집니다)'); return false }
-    if (!siteAddress) { setError('현장주소가 등록되지 않았습니다. 대시보드 · 현장 정보에서 입력하세요.'); return false }
+    if (!siteAddress) { setError('현장주소가 등록되지 않았습니다. 현장 요약 · 현장 정보에서 입력하세요.'); return false }
 
     const fd = new FormData()
     fd.set('home_address', r.originAddress)
@@ -767,7 +767,7 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
                       className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-700 focus:border-blue-500 focus:outline-none" />
                   </label>
                   <span className="col-span-2 text-[11px] text-gray-400">
-                    현장: {siteAddress || '주소 미등록 — 대시보드 · 현장 정보에서 입력'} · 자택↔현장 왕복 기준
+                    현장: {siteAddress || '주소 미등록 — 현장 요약 · 현장 정보에서 입력'} · 자택↔현장 왕복 기준
                   </span>
                 </div>
 
