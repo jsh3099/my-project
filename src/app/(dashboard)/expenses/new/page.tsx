@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { SiteExpenseBoard, type SiteExpenseCardDraft } from '@/components/expenses/SiteExpenseBoard'
 import { getSiteBudgetStatus } from '@/lib/budgetStatus'
-import { EXPENSE_SUBCATEGORIES, type ExpenseCategory } from '@/lib/constants'
+import { EXPENSE_SUBCATEGORIES, STAFF_TYPES, type ExpenseCategory } from '@/lib/constants'
 import type { Site, Profile, SettlementRound } from '@/types'
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -89,6 +89,17 @@ export default async function NewExpensePage({
     .select('welfare_monthly_limit')
     .eq('site_id', siteId)
     .maybeSingle()
+
+  // 복리후생비 한도의 상주 인원 — 명부(site_staff_members)가 단일 원천이다.
+  // 종전엔 카드가 무조건 1명으로 시작해, 고치지 않으면 한도가 절반이 된 채
+  // 아무 경고 없이 삭감됐다(상주 2명 현장에서 100,000 → 50,000원/월).
+  const { data: residentData } = await admin
+    .from('site_staff_members')
+    .select('id')
+    .eq('site_id', siteId)
+    .eq('staff_type', STAFF_TYPES.RESIDENT)
+    .eq('is_active', true)
+  const rosterResidentCount = (residentData ?? []).length
 
   // manual_person 대상자 옵션 (현장 배정 계정)
   const { data: assignmentsData } = await admin
@@ -183,6 +194,7 @@ export default async function NewExpensePage({
         periodEnd={periodEnd}
         staff={staff}
         welfareLimit={siteParams?.welfare_monthly_limit ?? 50000}
+        rosterResidentCount={rosterResidentCount}
         budget={budgetBySite[siteId] ?? null}
         drafts={drafts}
       />

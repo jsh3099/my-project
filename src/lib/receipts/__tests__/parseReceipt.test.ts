@@ -75,6 +75,48 @@ describe('현장경비 범용 영수증 인식', () => {
     expect(parseExpenseItems(['현 장 사 진', '2026-06-01 촬영'])).toEqual([])
   })
 
+  // 증빙을 1부로 편철해 올리는 건 기본 관행 — 종전엔 첫 장만 읽고 나머지를 조용히 버렸다
+  it('여러 장을 편철한 1부에서 상호 줄마다 끊어 건별로 인식한다', () => {
+    const receipt = (ym: string, amount: number) => [
+      '영 수 증',
+      '상호 테스트문구몰 대표 김OO',
+      `거래일시 ${ym}.13 14:22`,
+      'A4용지 3박스 33,000',
+      `합 계 ${amount.toLocaleString('en-US')}원`,
+    ]
+    const lines = [...receipt('2026.04', 55_000), ...receipt('2026.05', 61_000), ...receipt('2026.06', 48_000)]
+    expect(parseExpenseItems(lines)).toEqual([
+      { date: '2026-04-13', vendor: '테스트문구몰', description: '', amountGross: 55_000 },
+      { date: '2026-05-13', vendor: '테스트문구몰', description: '', amountGross: 61_000 },
+      { date: '2026-06-13', vendor: '테스트문구몰', description: '', amountGross: 48_000 },
+    ])
+  })
+
+  // 편철본 맨 뒤 총계가 별도 1건으로 잡히면 금액이 부푼다 — 상호 기준으로 끊는 이유
+  it('맨 뒤 총계 줄은 별도 건으로 잡지 않는다', () => {
+    const lines = [
+      '상호 테스트문구몰 대표 김OO', '거래일시 2026.04.13 14:22', '합 계 55,000원',
+      '상호 테스트문구몰 대표 김OO', '거래일시 2026.05.13 14:22', '합 계 55,000원',
+      '총 금액 110,000원',
+    ]
+    expect(parseExpenseItems(lines)).toEqual([
+      { date: '2026-04-13', vendor: '테스트문구몰', description: '', amountGross: 55_000 },
+      { date: '2026-05-13', vendor: '테스트문구몰', description: '', amountGross: 55_000 },
+    ])
+  })
+
+  // 상호가 한 번만 나오는 명세서형은 종전대로 1건 — 끊을 근거가 없다
+  it('상호가 하나뿐인 월별 명세서는 합계 1건으로 본다', () => {
+    const lines = [
+      '거 래 명 세 서', '상호 테스트문구몰 대표 김OO',
+      '2026.04.13 A4용지 55,000', '2026.05.13 A4용지 55,000',
+      '합 계 110,000원',
+    ]
+    expect(parseExpenseItems(lines)).toEqual([
+      { date: '2026-04-13', vendor: '테스트문구몰', description: '', amountGross: 110_000 },
+    ])
+  })
+
   it('파일명 구매처 추정: 날짜·일반어 토큰을 걷어낸다', () => {
     expect(vendorFromFileName('영수증_문구몰_2026-05.pdf')).toBe('문구몰')
     expect(vendorFromFileName('세금계산서_토너.pdf')).toBe('토너')

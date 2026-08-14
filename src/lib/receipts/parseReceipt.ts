@@ -86,7 +86,33 @@ export function vendorFromFileName(fileName: string): string {
   return tokens[0] ?? ''
 }
 
+// 영수증 여러 장을 한 부로 편철해 올리는 건 예외가 아니라 기본 관행이다(증빙 편철).
+// 종전엔 문서 전체에서 첫 상호·첫 날짜·첫 합계만 읽고 1건만 돌려줘, 2번째 장부터가
+// **경고 없이 버려졌다** — 사용자는 인식됐다고 믿고 넘어가고 차이는 정산서에서야 드러났다.
+// 그래서 상호 줄을 만날 때마다 새 영수증으로 끊어 건별로 인식한다.
+//
+// 끊는 기준을 합계가 아니라 상호로 잡은 이유: 편철본 맨 뒤의 총계 줄이 별도 1건으로
+// 잡혀 금액이 부풀지 않게 하려는 것이다(그 줄은 새 상호를 동반하지 않으므로 마지막
+// 구간에 남고, 구간은 자기 **첫** 합계만 쓰므로 무시된다).
+// 상호 줄이 없는 문서는 끊을 근거가 없어 종전대로 전체를 1건으로 본다.
 export function parseExpenseItems(lines: string[], fileName = ''): ParsedExpenseItem[] {
+  const segments: string[][] = [[]]
+  let segHasVendor = false
+  for (const line of lines) {
+    const v = line.match(VENDOR_RE)
+    const isVendor = !!v && v[1].trim().length >= 2
+    if (isVendor && segHasVendor) {
+      segments.push([])
+      segHasVendor = false
+    }
+    if (isVendor) segHasVendor = true
+    segments[segments.length - 1].push(line)
+  }
+  return segments.flatMap((seg) => parseOneExpense(seg, fileName))
+}
+
+// 영수증 1장분 — 첫 상호·첫 날짜·첫 합계(없으면 최대 금액)
+function parseOneExpense(lines: string[], fileName: string): ParsedExpenseItem[] {
   let vendor = ''
   let firstDate = ''
   let totalAmount = 0

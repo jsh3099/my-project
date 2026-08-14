@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { ClipboardCheck } from 'lucide-react'
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_LABELS,
@@ -23,7 +24,7 @@ import {
   type SiteExpenseReceiptTarget,
 } from '@/actions/siteExpenses'
 import { parseExpenseReceipt } from '@/actions/receiptParse'
-import { calcItemized, calcWelfare } from '@/lib/settlement'
+import { calcItemized, calcWelfare, remainingLabel } from '@/lib/settlement'
 import { receiptFileName, receiptHref } from '@/lib/storage/receipts'
 
 // 서버에서 복원하는 draft (월 × 세부항목 1건)
@@ -46,6 +47,8 @@ interface Props {
   periodEnd: string
   staff: Profile[]        // manual_person 대상자 옵션
   welfareLimit: number
+  /** 명부(site_staff_members)의 활성 상주기술인 수 — 복리후생 한도 기본값 */
+  rosterResidentCount: number
   budget: SiteBudgetStatus | null
   drafts: SiteExpenseCardDraft[]
 }
@@ -89,33 +92,53 @@ const CATEGORY_ACCENT: Record<ExpenseCategory, { border: string; chip: string }>
   printing: { border: 'border-l-emerald-500', chip: 'bg-emerald-50 text-emerald-700' },
 }
 
+// 이 화면의 출장비는 전부 상주기술인 몫이다 — 기술지원 출장비(support_trip)는 entryType이
+// auto_trip이라 피커에서도 draft 조회(MANUAL_SUBS)에서도 빠지고 사이드바 「기술지원 출장비」
+// 화면이 담당한다. 그냥 '출장비'로 두면 그 화면까지 포함하는지 알 수 없어 누구 몫인지 밝힌다.
+const RESIDENT_TRIP_LABEL = '상주기술인 출장비'
+
 // 현장주재비 세부항목은 중분류 라벨을 칩에 쓴다 (현장운영경비 등)
 function categoryChipLabel(category: ExpenseCategory, subcategory: string): string {
   if (category === 'site_residence') {
     const mid = EXPENSE_SUBCATEGORIES.site_residence.find((s) => s.value === subcategory)?.midCategory
     if (mid === 'site_operation') return '현장운영경비'
   }
+  if (category === 'business_trip') return RESIDENT_TRIP_LABEL
   return EXPENSE_CATEGORY_LABELS[category]
 }
 
 // 피커 탭 라벨 — 현장주재비 탭에는 숙식비·교통비가 안 나온다(그 둘은 주재비 화면 담당이라
 // entryType 필터에서 빠진다). 남는 건 현장운영경비 6종뿐인데 탭 이름이 '현장주재비'면
 // 사이드바 「상주기술인 주재비」와 같은 말로 읽혀 중복처럼 보인다 — 실제 내용대로 적는다.
+// 출장비 탭도 같은 이유로 상주기술인 몫임을 밝힌다 (RESIDENT_TRIP_LABEL 주석 참고).
 // 정산서 출력의 비목명은 예본 서식이므로 EXPENSE_CATEGORY_LABELS 그대로 둔다.
 function pickerTabLabel(category: ExpenseCategory): string {
-  return category === 'site_residence' ? '현장운영경비' : EXPENSE_CATEGORY_LABELS[category]
+  if (category === 'site_residence') return '현장운영경비'
+  if (category === 'business_trip') return RESIDENT_TRIP_LABEL
+  return EXPENSE_CATEGORY_LABELS[category]
 }
 
 function subDef(category: ExpenseCategory, subcategory: string) {
   return EXPENSE_SUBCATEGORIES[category]?.find((s) => s.value === subcategory)
 }
 
+// 우측 시트 이름 — 안에 든 상자 제목(필수 증빙 / 인정금액 산출 / 계상 대비 잔액)을 그대로 쓴다.
+// 종전 「항목 상세」는 카드에 이미 펼쳐져 있는 건별 내역이 더 나올 것처럼 읽혔는데,
+// 시트에는 내역이 한 줄도 없고 증빙 요건과 예산만 있다. 여는 버튼과 시트 제목이 같은 말을 쓴다.
+function sheetLabel(isWelfare: boolean): string {
+  return isWelfare ? '필수 증빙 · 산출 · 계상 잔액' : '필수 증빙 · 계상 잔액'
+}
+
 export function SiteExpenseBoard({
-  siteId, roundLabel, months, periodStart, periodEnd, staff, welfareLimit, budget, drafts,
+  siteId, roundLabel, months, periodStart, periodEnd, staff, welfareLimit, rosterResidentCount, budget, drafts,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+
+  // 복리후생 한도의 상주 인원 — 명부가 단일 원천이라 새 카드는 명부 인원으로 시작한다.
+  // 명부가 비어 있을 때만 1로 떨어진다(0명이면 한도가 0이라 전액 불인정이 되어 버린다).
+  const defaultHeadcount = String(Math.max(1, rosterResidentCount))
 
   // 서버 draft(월 단위)를 카드(세부항목 단위)로 묶어 복원
   function seedCards(): CardState[] {
@@ -130,7 +153,8 @@ export function SiteExpenseBoard({
           subcategory: d.subcategory,
           targetUserId: d.targetUserId ?? '',
           vatMode: d.vatMode,
-          headcount: String(d.headcount || 1),
+          // 저장된 인원은 사용자가 고른 값이므로 그대로 쓴다 — 비어 있을 때만 명부로 채운다
+          headcount: String(d.headcount || defaultHeadcount),
           mobileConfirmed: true, // 저장돼 있던 카드는 이미 확인된 것으로 본다
           items: [],
           receiptUrls: [],
@@ -207,7 +231,7 @@ export function SiteExpenseBoard({
   const [uploading, setUploading] = useState<Set<string>>(new Set())
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({})
 
-  // ── 우측 시트: 항목 상세 (필수 증빙·계상 잔액·복리후생 산출 근거) ──
+  // ── 우측 시트: 필수 증빙 · (복리후생) 산출 · 계상 잔액 — sheetLabel 주석 참고 ──
   const [sheetKey, setSheetKey] = useState<string | null>(null)
   useEffect(() => {
     if (!sheetKey) return
@@ -339,8 +363,23 @@ export function SiteExpenseBoard({
     })
   }
 
+  // 저장한 카드는 접고 피커로 데려간다 — 카드가 쌓일수록 피커가 아래로 밀려
+  // 다음 항목을 넣으려면 사용자가 스크롤을 찾아 내려가야 했다(새 카드가 화면 밖에
+  // 생기던 문제의 반대 방향). 곧장 스크롤만 하면 화면이 튀면서 `✓ 저장됨`을 못 보고
+  // 지나가므로, **접기를 완료 신호로 삼는다** — 접힌 머리줄에 건수·금액·저장됨이
+  // 그대로 남고, 페이지가 짧아지면서 피커가 자연스럽게 올라온다.
+  // block:'nearest'라 이미 보이면 움직이지 않는다.
+  const pickerRef = useRef<HTMLElement | null>(null)
+  const [pickerFocus, setPickerFocus] = useState(0)
+  useEffect(() => {
+    if (!pickerFocus) return
+    pickerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [pickerFocus])
+
   // ── 저장 (카드 단위) ──
-  function saveCard(key: string) {
+  // revealPicker=false는 「전체 임시저장」용 — 여러 장을 한꺼번에 저장할 때는
+  // 접기만 하고 스크롤은 하지 않는다(끝냈다는 뜻이지 다음 항목을 넣겠다는 뜻이 아니다).
+  function saveCard(key: string, { revealPicker = true }: { revealPicker?: boolean } = {}) {
     const card = cards.find((c) => c.key === key)
     if (!card) return
     const def = subDef(card.category, card.subcategory)
@@ -386,12 +425,14 @@ export function SiteExpenseBoard({
         : c))
       setDirty((p) => { const n = new Set(p); n.delete(key); return n })
       setSaveState((p) => ({ ...p, [key]: 'saved' }))
+      setOpenCards((p) => { const n = new Set(p); n.delete(key); return n })
+      if (revealPicker) setPickerFocus((n) => n + 1)
       router.refresh()
     })
   }
 
   function saveAll() {
-    for (const c of cards) if (dirty.has(c.key)) saveCard(c.key)
+    for (const c of cards) if (dirty.has(c.key)) saveCard(c.key, { revealPicker: false })
   }
 
   // ── + 항목 추가 피커 ──
@@ -433,7 +474,7 @@ export function SiteExpenseBoard({
       subcategory,
       targetUserId: '',
       vatMode: def?.entryType === 'manual_site' ? 'exclude_10' : 'none',
-      headcount: '1',
+      headcount: defaultHeadcount,
       mobileConfirmed: false,
       items: [],
       receiptUrls: [],
@@ -540,11 +581,16 @@ export function SiteExpenseBoard({
             <div className="text-right">
               <div className="text-[15px] font-bold text-gray-900">{total > 0 ? `${fmt(total)}원` : '—'}</div>
               <div className="text-[10px] text-gray-400">
-                {remaining !== null
-                  ? remaining < 0
-                    ? <span className="font-semibold text-red-500">계상 초과 {fmt(-remaining)}원</span>
-                    : `계상 잔액 ${fmt(remaining)}원`
-                  : '인정금액'}
+                {/* 복리후생비는 실제로 금액을 가르는 게 비목 계상이 아니라 인원×한도다 —
+                    카드 금액과 같은 단위(회차 합계)로 천장을 보여준다. 비목 계상 잔액은
+                    다른 카드들과 상단 총액 배너에 이미 나온다. */}
+                {isWelfare
+                  ? `복리후생 한도 ${fmt(headcountNum * welfareLimit * months.length)}원`
+                  : remaining !== null
+                    ? remaining < 0
+                      ? <span className="font-semibold text-red-500">계상 초과 {fmt(-remaining)}원</span>
+                      : `계상 잔액 ${fmt(remaining)}원`
+                    : '인정금액'}
               </div>
             </div>
             <button type="button" onClick={() => toggleOpen(card.key)} aria-expanded={isOpen} aria-label="상세 접기/펼치기"
@@ -574,12 +620,26 @@ export function SiteExpenseBoard({
             {/* 조건 바 — VAT·한도 기준·대상자는 카드당 한 번 */}
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-gray-100 bg-gray-50/60 px-4 py-2.5 text-xs text-gray-500">
               {isWelfare && (
-                <span className="flex items-center gap-1.5">
-                  월별 정산기준: 상주
+                /* 한도는 월 단위인데 카드 머리 금액은 회차 합계라, 「= 100,000원/월」만 적어 두면
+                   5개월 합계(318,180원)가 왜 안 잘렸냐고 읽힌다(실제 오독 발생).
+                   카드 금액과 같은 단위인 회차 천장을 나란히 적어 단위를 못 헷갈리게 한다. */
+                <span className="flex flex-wrap items-center gap-1.5">
+                  상주
                   <input type="number" min={1} value={card.headcount}
                     onChange={(e) => patchCard(card.key, { headcount: e.target.value })}
                     className="w-14 rounded border border-gray-300 bg-white px-1.5 py-1 text-center text-xs focus:border-blue-500 focus:outline-none" />
-                  명 × 월한도 {fmt(welfareLimit)}원 = <b className="text-gray-700">{fmt(headcountNum * welfareLimit)}원/월</b>
+                  명 × 월 {fmt(welfareLimit)}원 =
+                  <b className="text-gray-700">월 {fmt(headcountNum * welfareLimit)}원</b>
+                  <span className="text-gray-400">·</span>
+                  <b className="text-gray-700">{months.length}개월 {fmt(headcountNum * welfareLimit * months.length)}원</b>
+                  {/* 인원은 취향이 아니라 사실 — 명부와 다르면 조용히 넘어가지 않게 근거를 밝힌다 */}
+                  {rosterResidentCount > 0 && (
+                    headcountNum === rosterResidentCount
+                      ? <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10.5px] text-gray-500">명부 기준 {rosterResidentCount}명</span>
+                      : <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-700">
+                          명부는 {rosterResidentCount}명 — 확인하세요
+                        </span>
+                  )}
                 </span>
               )}
               {def.entryType === 'manual_person' && (
@@ -607,8 +667,9 @@ export function SiteExpenseBoard({
                 </label>
               )}
               <button type="button" onClick={() => setSheetKey(card.key)}
-                className="text-xs font-semibold text-blue-600 hover:underline">
-                📎 항목 상세 (증빙 기준·계상 잔액)
+                className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
+                <ClipboardCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                {sheetLabel(isWelfare)}
               </button>
             </div>
 
@@ -772,7 +833,7 @@ export function SiteExpenseBoard({
       </div>
 
       {/* + 항목 추가 피커 — 기존 4단계 위저드 대체 */}
-      <section className="rounded-xl border border-dashed border-gray-300 bg-white px-4 py-4">
+      <section ref={pickerRef} className="rounded-xl border border-dashed border-gray-300 bg-white px-4 py-4">
         <p className="mb-2.5 text-sm font-semibold text-gray-600">+ 항목 추가 — 세부항목을 고르면 위에 카드가 생깁니다</p>
         <div className="mb-2.5 flex flex-wrap gap-1.5">
           {(Object.values(EXPENSE_CATEGORIES) as ExpenseCategory[]).map((cat) => (
@@ -811,7 +872,7 @@ export function SiteExpenseBoard({
             )
           })}
           {pickerSubs.length === 0 && (
-            <p className="col-span-full text-xs text-gray-400">이 비목의 항목은 주재비·출장비 화면에서 입력합니다.</p>
+            <p className="col-span-full text-xs text-gray-400">이 비목의 항목은 「상주기술인 주재비」·「기술지원 출장비」 화면에서 입력합니다.</p>
           )}
         </div>
       </section>
@@ -831,11 +892,13 @@ export function SiteExpenseBoard({
       {sheetCard && sheetDef && (
         <>
           <div className="fixed inset-0 z-40 bg-gray-900/40" onClick={() => setSheetKey(null)} aria-hidden="true" />
-          <aside role="dialog" aria-modal="true" aria-label={`${sheetDef.label} 상세`}
+          <aside role="dialog" aria-modal="true" aria-label={`${sheetDef.label} ${sheetLabel(sheetDef.limitType === 'welfare')}`}
             className="fixed inset-y-0 right-0 z-50 flex w-[min(430px,92vw)] flex-col bg-white shadow-2xl">
             <div className="flex items-start justify-between border-b border-gray-200 px-5 py-4">
               <div>
-                <h3 className="text-[15px] font-bold text-gray-900">{sheetDef.label} — 항목 상세</h3>
+                <h3 className="text-[15px] font-bold text-gray-900">
+                  {sheetDef.label} — {sheetLabel(sheetDef.limitType === 'welfare')}
+                </h3>
                 <p className="mt-0.5 text-xs text-gray-500">{roundLabel}</p>
               </div>
               <button type="button" onClick={() => setSheetKey(null)} aria-label="닫기"
@@ -881,22 +944,25 @@ export function SiteExpenseBoard({
 
               {/* 계상 대비 */}
               <div className="rounded-lg border border-gray-200 p-3.5 text-sm">
-                <p className="mb-2 text-xs font-semibold text-gray-500">계상 대비</p>
+                <p className="mb-2 text-xs font-semibold text-gray-500">계상 대비 잔액</p>
+                {/* 부호 대신 「초과」로 적는다 — 음수를 그대로 쓰면 "잔액 −7,079,115원"이 이중 부정으로
+                    읽힌다(실제 오독 발생). 정산 화면들과 같은 remainingLabel 규칙을 쓴다. */}
                 {(() => {
                   const rem = categoryRemaining(sheetCard.category)
                   const totalRem = budget ? budget.totalBudget - budget.totalUsed : null
+                  const won = (n: number) => `${fmt(n)}원`
                   return (
                     <>
                       <div className="flex justify-between py-0.5">
-                        <span className="text-gray-500">{EXPENSE_CATEGORY_LABELS[sheetCard.category]} 잔액</span>
+                        <span className="text-gray-500">{EXPENSE_CATEGORY_LABELS[sheetCard.category]}</span>
                         {rem !== null
-                          ? <b className={rem < 0 ? 'text-red-600' : ''}>{fmt(rem)}원</b>
+                          ? <b className={rem < 0 ? 'text-red-600' : ''}>{remainingLabel(rem, won).text}</b>
                           : <span className="text-gray-400">계상 미입력</span>}
                       </div>
                       <div className="flex justify-between py-0.5">
-                        <span className="text-gray-500">직접경비 총액 잔액</span>
+                        <span className="text-gray-500">직접경비 총액</span>
                         {totalRem !== null && budget && budget.totalBudget > 0
-                          ? <b className={totalRem < 0 ? 'text-red-600' : ''}>{fmt(totalRem)}원</b>
+                          ? <b className={totalRem < 0 ? 'text-red-600' : ''}>{remainingLabel(totalRem, won).text}</b>
                           : <span className="text-gray-400">계상 미입력</span>}
                       </div>
                       <p className="mt-2 text-xs text-gray-400">

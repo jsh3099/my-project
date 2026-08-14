@@ -395,6 +395,55 @@ async function genSiteExpense(
   })
 }
 
+// ── 6-1. 현장경비 영수증 (월별 5장을 1부로 편철) ──────────────
+// 실무 편철 방식 — 월별 영수증을 한 부로 묶어 한 번에 첨부한다. 쪽당 1장, 5쪽.
+//
+// parseExpenseItems가 **상호 줄마다 끊어** 건별로 인식하므로 이 묶음은 5건으로 들어간다
+// (쪽마다 상호를 반복하는 이 서식이 그 계약이다 — 상호를 지우면 1건으로 뭉친다).
+// 맨 뒤 총계는 대조용이며 낱말을 '총계'로 둔다 — '합계·총액' 계열로 쓰면 별도 1건으로 잡힌다.
+async function genSiteExpenseRollup(
+  outDir: string,
+  spec: { file: string; vendor: string; day: number; items: [string, number][] },
+) {
+  const monthly = spec.items.reduce((s, [, v]) => s + v, 0)
+  const total = monthly * MONTHS.length
+  const page = (ym: string, idx: number): Content[] => {
+    const [y, m] = ym.split('-').map(Number)
+    return [
+      { text: `${idx + 1} / ${MONTHS.length}`, fontSize: 8, color: '#888', alignment: 'right',
+        ...(idx > 0 ? { pageBreak: 'before' as const } : {}) },
+      title('영 수 증'),
+      kv([
+        ['상호', `${spec.vendor} 대표 김OO`],
+        ['거래일시', `${y}.${pad(m)}.${pad(spec.day)} 14:22`],
+        ['사업자번호', '000-00-00000 (가상)'],
+      ], [80, '*']),
+      {
+        table: {
+          headerRows: 1,
+          widths: ['*', 90],
+          body: [
+            [{ text: '품목', bold: true }, { text: '금액', bold: true }],
+            ...spec.items.map(([label, v]) => [label, won(v)]),
+            [{ text: '합 계', bold: true }, { text: `${won(monthly)}원`, bold: true }],
+          ] as TableCell[][],
+        },
+        layout: 'lightHorizontalLines',
+      },
+      note(RECEIPT_DISCLAIMER),
+    ]
+  }
+  await write(outDir, `테스트_${spec.file}_영수증_${MONTHS[0]}~${MONTHS[MONTHS.length - 1].slice(5)}_1부.pdf`, {
+    pageSize: 'A5',
+    watermark: watermark('테스트용 샘플'),
+    content: [
+      ...MONTHS.flatMap((ym, i) => page(ym, i)),
+      { text: `${MONTHS.length}개월 총계 ${won(total)}원`, bold: true, fontSize: 11,
+        alignment: 'right', margin: [0, 12, 0, 0] },
+    ],
+  })
+}
+
 // ── 7. 출장비 실비 증빙 (방문일별) ────────────────────────────
 async function genTripReceipt(outDir: string, name: string, date: string, kind: '유류' | '통행료') {
   const amount = kind === '유류' ? TRIP_FUEL : TRIP_TOLL
@@ -457,6 +506,8 @@ async function main() {
   for (const ym of MONTHS) {
     for (const spec of SITE_EXPENSES) await genSiteExpense(path.join(ROOT, '4.현장경비', ym), ym, spec)
   }
+  // 회차 전체를 한 번에 첨부할 때 쓰는 합본 — 월별 5장과 금액 사양은 같다
+  for (const spec of SITE_EXPENSES) await genSiteExpenseRollup(path.join(ROOT, '4.현장경비'), spec)
 
   for (const s of SUPPORTERS) {
     for (const v of s.visits) {
