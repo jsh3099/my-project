@@ -28,6 +28,13 @@ import {
   type VehicleFuelType,
 } from '@/lib/constants'
 import { applyVatExclusion, convertJeonseToMonthly } from '@/lib/settlement'
+import {
+  claimableCommute,
+  claimableCostPerTrip,
+  claimableMeal,
+  evidenceBlockReason,
+  type StaffEvidence,
+} from '@/lib/expenses/evidenceGate'
 import { CommuteCalcPanel, type CommuteApplyParams } from './CommuteCalcPanel'
 import { parseReceiptAmounts } from '@/actions/receiptParse'
 
@@ -51,6 +58,8 @@ interface Props {
   myFuelType?: string | null
   /** 현장주재비 비목의 계상 잔액 (계상 미입력이면 null) — 삭감 위험 사전 인지용 */
   categoryRemaining?: number | null
+  /** 출근부 스캔 첨부 유무 — 식대·교통비의 필수 증빙 (없으면 두 비목을 계상하지 않는다) */
+  hasAttendanceDoc?: boolean
 }
 
 const ACCEPT = '.jpg,.jpeg,.png,.pdf'
@@ -127,6 +136,8 @@ export type StaffCostDraftItem = {
     fuelPriceDate: string | null
     tollRoundtrip: number
     multiplier: number
+    /** 산출 파라미터로 다시 계산한 1회 왕복비 — 증빙이 없어 금액이 0이어도 이 값은 살아 있다 */
+    costPerTrip: number
   } | null
 }
 
@@ -175,10 +186,14 @@ function makeDefaultRow(
 // 자가 출퇴근자는 숙소임대비·관리비를 계상하지 않는다 (예본 「1-1 숙소비 사용내역」 비대상)
 const isCommuter = (r: Row) => r.commuteMode === 'daily_commute'
 
+// 증빙 게이트와 무관한 값(숙소임대비 등)만 꺼낼 때 쓰는 통과용 상태.
+// 식대·교통비를 읽는 곳에서는 절대 쓰지 말 것 — 증빙 없는 금액이 그대로 나온다.
+const UNGATED: StaffEvidence = { hasAttendanceDoc: true, hasResidenceDoc: true }
+
 // 행별 파생값 계산 (미리보기용 — 저장 시 서버가 동일 규칙으로 재계산)
-function deriveRow(r: Row, mealDailyLimit: number) {
+function deriveRow(r: Row, mealDailyLimit: number, ev: StaffEvidence = UNGATED) {
   const wd = parseInt(r.workDays) || 0
-  const meal = wd * mealDailyLimit
+  const meal = claimableMeal(wd, mealDailyLimit, ev)
   const rentInput = r.lodgingContract === 'jeonse'
     ? convertJeonseToMonthly(parseNum(r.deposit), parseFloat(r.conversionRate) || 0)
     : parseNum(r.lodgingRent)
@@ -190,8 +205,11 @@ function deriveRow(r: Row, mealDailyLimit: number) {
   // 출퇴근형인데 숙소비 입력이 남아 있으면 알려준다 (저장 시 정리됨)
   const staleLodging = isCommuter(r) ? rentInput + maintInput : 0
   const multiplier = r.commuteMode === 'daily_commute' ? wd : (parseInt(r.commuteTrips) || 0)
-  const commuteTotal = parseNum(r.commuteRoundtrip) * multiplier
-  return { wd, meal, lodgingRent, maintGross, maintApplied, multiplier, commuteTotal, staleLodging, subtotal: meal + lodgingRent + maintApplied + commuteTotal }
+  const commuteTotal = claimableCommute(parseNum(r.commuteRoundtrip), multiplier, ev)
+  // 증빙이 없어 계상하지 못하는 이유 — 카드에 그대로 띄운다 (금액만 0이면 고장으로 읽힌다)
+  const mealBlocked = evidenceBlockReason(ev, 'meal')
+  const commuteBlocked = evidenceBlockReason(ev, 'commute')
+  return { wd, meal, lodgingRent, maintGross, maintApplied, multiplier, commuteTotal, staleLodging, mealBlocked, commuteBlocked, subtotal: meal + lodgingRent + maintApplied + commuteTotal }
 }
 
 let extraIdSeq = 0
@@ -538,7 +556,7 @@ function LodgingPanel({ r, onChange }: {
 // 표에 뜨는 기본 인원: 명부 인원(key=m_{memberId})
 type BasePerson = { key: string; name: string; defaultSpecialty: string | null; residenceType: ResidenceType }
 
-export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance, existingDrafts = [], defaultPeriodStart, defaultPeriodEnd, mealDailyLimit = 25000, applyCommuteRegulation = true, commuteTripsDefault = 4, siteAddress, myUserId, myHomeAddress, myFuelType, categoryRemaining = null }: Props) {
+export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance, existingDrafts = [], defaultPeriodStart, defaultPeriodEnd, mealDailyLimit = 25000, applyCommuteRegulation = true, commuteTripsDefault = 4, siteAddress, myUserId, myHomeAddress, myFuelType, categoryRemaining = null, hasAttendanceDoc = false }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -558,6 +576,19 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
   const memberHomeAddress: Record<string, string | undefined> = Object.fromEntries(
     members.map((m) => [`m_${m.id}`, m.home_address ?? undefined]),
   )
+
+  // 거주지 증빙(재직증명서 등) 보유 여부 — 교통비의 필수 증빙이라 없으면 계상하지 않는다.
+  // expenses는 인원을 이름으로 식별하므로(명부 인원은 로그인 계정이 없다) 이름으로 묶는다.
+  const residenceDocByName: Record<string, boolean> = {}
+  for (const m of members) {
+    residenceDocByName[m.name] = residenceDocByName[m.name] || (m.residence_doc_urls ?? []).length > 0
+  }
+  // 명부에 없는 이름(화면에서 직접 추가한 인원)은 거주지 증빙을 붙일 자리가 없다 —
+  // 게이트를 걸면 되돌릴 방법 없이 교통비가 0으로 굳으므로 통과시킨다. 서버도 같은 규칙.
+  const evidenceOf = (name: string): StaffEvidence => ({
+    hasAttendanceDoc,
+    hasResidenceDoc: name in residenceDocByName ? residenceDocByName[name] : true,
+  })
 
   // 기성기간 개월수 — 첨부 한도·주말 왕복 기본 횟수의 기준
   const periodMonths =
@@ -604,8 +635,14 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
         : base.maintItems,
       commuteMode: commute?.commute?.mode ?? base.commuteMode,
       commuteTrips: commute?.commute ? String(commute.commute.multiplier) : base.commuteTrips,
-      commuteRoundtrip: commute && commute.commute
-        ? Math.round(commute.amount / Math.max(1, commute.commute.multiplier)).toLocaleString('ko-KR')
+      // 1회 왕복비는 저장 금액이 아니라 산출 파라미터에서 복원한다 — 종전의 amount ÷ multiplier는
+      // 증빙을 떼서 금액이 0이 되면 단가까지 0으로 굳어 되돌릴 수 없었다.
+      // 증빙(출근부·거주지 증빙)이 없으면 빈칸으로 두고, 다시 붙이면 이 자리에서 그대로 살아난다.
+      commuteRoundtrip: commute?.commute
+        ? (() => {
+            const perTrip = claimableCostPerTrip(commute.commute.costPerTrip, evidenceOf(name))
+            return perTrip > 0 ? perTrip.toLocaleString('ko-KR') : ''
+          })()
         : base.commuteRoundtrip,
       commuteCalc: commute?.commute
         ? {
@@ -970,9 +1007,15 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
   }
 
   // 합계
-  const allRows = [...activePersons.map((p) => rows[p.key]), ...extraRows].filter(Boolean) as Row[]
-  const totals = allRows.reduce((acc, r) => {
-    const d = deriveRow(r, mealDailyLimit)
+  // 합계도 증빙 게이트를 거친 금액으로 낸다 — 카드 금액과 상단 합계가 어긋나면
+  // 어느 쪽이 정산서에 실리는지 알 수 없다 (인원마다 증빙 상태가 다르므로 이름이 필요하다)
+  const allEntries = [
+    ...activePersons.map((p) => ({ row: rows[p.key], name: names[p.key] ?? p.name })),
+    ...extraRows.map((e) => ({ row: e as Row, name: e.name })),
+  ].filter((e) => !!e.row)
+  const allRows = allEntries.map((e) => e.row)
+  const totals = allEntries.reduce((acc, { row: r, name }) => {
+    const d = deriveRow(r, mealDailyLimit, evidenceOf(name))
     acc.meal += d.meal
     acc.commute += d.commuteTotal
     acc.lodgingRent += d.lodgingRent
@@ -983,7 +1026,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
   const totalWorkDays = allRows.reduce((s, r) => s + (parseInt(r.workDays) || 0), 0)
 
   function buildPayloadRow(rowId: string, userId: string, userName: string, r: Row): StaffCostRow {
-    const d = deriveRow(r, mealDailyLimit)
+    const d = deriveRow(r, mealDailyLimit, evidenceOf(userName))
     return {
       rowId,
       userId,
@@ -1067,7 +1110,8 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
   // 컴포넌트가 아닌 렌더 함수로 호출한다 — 부모 안에서 정의한 함수를 JSX 태그로 쓰면
   // 렌더마다 타입이 바뀌어 리마운트되고 입력 포커스가 날아간다.
   function renderCard(id: string, r: Row, isExtra: boolean, nameNode: ReactNode) {
-    const d = deriveRow(r, mealDailyLimit)
+    const rowName = isExtra ? (extraRows.find((e) => e.id === id)?.name ?? '') : (names[id] ?? '')
+    const d = deriveRow(r, mealDailyLimit, evidenceOf(rowName))
     const patch = (p: Partial<Row>) => patchRow(id, isExtra, p)
     const commuter = isCommuter(r)
     const residence = commuteModeToResidence(r.commuteMode)
@@ -1202,6 +1246,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                 </div>
                 <div className="text-[15px] font-bold text-blue-700">{d.meal > 0 ? `${d.meal.toLocaleString()}원` : '—'}</div>
                 <p className="text-[11px] text-gray-400">{d.wd}일 × {mealDailyLimit.toLocaleString()}원 (출근부 기준)</p>
+                {d.mealBlocked && <p className="text-[11px] font-semibold text-amber-700">⚠ {d.mealBlocked}</p>}
               </div>
 
               <div className="flex min-h-[108px] flex-col gap-1.5 bg-white p-3.5">
@@ -1236,6 +1281,9 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                         기성기간 전체 기준 — 월 {commuteTripsDefault}회 × {periodMonths}개월 = {roundTripsDefault}회
                       </p>
                     )}
+                    {/* 증빙이 없으면 단가가 빈칸이 된다 — 이유를 적어두지 않으면 값이 사라진 고장으로 읽힌다.
+                        증빙을 다시 붙이면 저장된 산출 파라미터에서 원래 단가가 그대로 복원된다. */}
+                    {d.commuteBlocked && <p className="text-[11px] font-semibold text-amber-700">⚠ {d.commuteBlocked}</p>}
                     <button type="button" onClick={() => setSheet({ id, isExtra, panel: 'commute' })}
                       className="mt-auto text-left text-xs font-semibold text-green-700 hover:underline">
                       🚗 자차 왕복비 산출

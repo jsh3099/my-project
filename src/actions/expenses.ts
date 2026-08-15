@@ -1,10 +1,18 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { expenseSchema } from '@/lib/validations/expense'
 import { calcCommute, calcItemized, calcTripVisit, calcWelfare, sumTripVisits, convertJeonseToMonthly } from '@/lib/settlement'
 import { FUEL_EFFICIENCY, type CommuteMode, type VehicleFuelType } from '@/lib/constants'
+import {
+  claimableCommute,
+  claimableCostPerTrip,
+  claimableMeal,
+  type StaffEvidence,
+} from '@/lib/expenses/evidenceGate'
+import { loadRecalcContext } from '@/lib/expenses/recalcStaffCosts'
 import { RECEIPTS_BUCKET, receiptStoragePath, receiptStoredValue } from '@/lib/storage/receipts'
 import { extractPdfLines } from '@/lib/attendance/parseSheet'
 import { parseRentTotal, parseMaintItems, type ParsedMaintItem } from '@/lib/receipts/parseReceipt'
@@ -259,6 +267,11 @@ export async function createStaffCosts(formData: FormData) {
     .maybeSingle()
   const mealLimit = siteParams?.meal_allowance_daily_limit ?? 25000
   const [yr, mo] = yearMonth.split('-').map(Number)
+
+  // 증빙 상태 — 식대·교통비는 출근부·거주지 증빙에서 파생되는 금액이라, 증빙이 없으면
+  // 클라이언트가 값을 보내도 0으로 확정한다(자가 출퇴근자 숙소비를 0으로 막는 것과 같은 방식).
+  // 이게 없으면 증빙을 지워 0이 된 금액이 다음 저장 때 되살아난다.
+  const evidenceCtx = await loadRecalcContext(admin, siteId, yr, mo)
   const expenseDate = lastDayOfMonth(yearMonth)
   const base = { site_id: siteId, submitted_by: user.id, user_id: user.id, year: yr, month: mo, year_month: yearMonth, status: 'draft', is_over_limit: false, over_limit_amount: 0, expense_date: expenseDate, headcount: 1 }
 
@@ -378,8 +391,19 @@ export async function createStaffCosts(formData: FormData) {
   }
 
   for (const row of rows) {
-    // 식대: 근무일수 × 단가 (서버에서 재계산)
-    reconcile(row, 'meal', 'site_residence', row.workDays > 0 ? row.workDays * mealLimit : 0, { workingDays: row.workDays || null })
+    // 이 인원의 증빙 상태 — 출근부는 현장 공통, 거주지 증빙은 사람마다 다르다
+    const evidence: StaffEvidence = {
+      hasAttendanceDoc: evidenceCtx.hasAttendanceDoc,
+      // 명부에 없는 이름(화면에서 직접 추가한 인원)은 거주지 증빙을 붙일 자리가 없다 —
+      // 게이트를 걸면 되돌릴 방법 없이 0으로 굳으므로 통과시킨다 (폼·재계산과 같은 규칙)
+      hasResidenceDoc:
+        row.userName in evidenceCtx.residenceDocByName ? evidenceCtx.residenceDocByName[row.userName] : true,
+    }
+
+    // 식대: 근무일수 × 단가 (서버에서 재계산) — 출근부가 없으면 계상하지 않는다
+    reconcile(row, 'meal', 'site_residence', claimableMeal(row.workDays, mealLimit, evidence), {
+      workingDays: row.workDays || null,
+    })
 
     // 자가 출퇴근자(출퇴근형)는 숙소비 대상이 아니다 — 클라이언트가 값을 보내도 0으로 확정한다
     // (예본 「1-1 상주기술인 숙소비 사용내역」 비대상. 화면도 같은 규칙으로 칸을 잠근다)
@@ -418,10 +442,13 @@ export async function createStaffCosts(formData: FormData) {
       })
       costPerTrip = recalc.costPerTrip
     }
-    const commuteAmount = costPerTrip * Math.max(0, multiplier)
+    // 출근부·거주지 증빙이 모두 있어야 계상한다 (constants.ts requireDocs와 같은 기준).
+    // 산출 파라미터(commuteCalc)는 증빙과 무관하게 그대로 저장한다 — 증빙을 다시 붙였을 때
+    // 거리·유가를 재조회하지 않고 복원되어야 한다.
+    const commuteAmount = claimableCommute(costPerTrip, multiplier, evidence)
     reconcile(row, 'commute', 'site_residence', commuteAmount, {
       workingDays: row.workDays || null,
-      calcDetail: { mode: row.commuteMode, costPerTrip, multiplier },
+      calcDetail: { mode: row.commuteMode, costPerTrip: claimableCostPerTrip(costPerTrip, evidence), multiplier },
       child: row.commuteCalc ? { commuteCalc: row.commuteCalc, commuteMultiplier: multiplier, commuteMode: row.commuteMode } : undefined,
     })
   }
@@ -1008,4 +1035,59 @@ export async function submitExpenses(siteId: string, yearMonth: string) {
   const { error } = await query
   if (error) return { error: error.message }
   return { success: true }
+}
+
+// 제출 취소 — 본사가 아직 손대지 않은 제출분을 현장이 스스로 draft로 되돌린다.
+//
+// 왜 필요한가: 제출하면 그 달(회차 전체 월)의 주재비·출장비 저장이 서버에서 막히는데
+// (createStaffCosts의 제출분 검사), 되돌리는 경로는 본사 반려뿐이었다. 본사 계정이 없으면
+// 현장은 잘못 누른 제출을 영영 풀 수 없어 회차 전체가 잠겼다.
+//
+// 되돌리는 범위는 제출과 정확히 대칭이다 — 제출이 회차 기간 전체를 한 번에 바꾸므로
+// 취소도 같은 범위를 되돌린다. 그러지 않으면 일부 월만 draft가 되어 회차 확정에서
+// 조용히 누락된다(제출이 월 단위였을 때 났던 문제와 같은 종류).
+//
+// 건드리지 않는 것:
+//   - approved / rejected: 본사가 이미 판단한 건이다. 승인분을 현장이 되돌리면 검토 결과가
+//     뒤집히고, 반려분은 사유 확인 후 재입력하는 별도 흐름이 있다.
+//   - settlement_round_id 가 있는 건: 회차에 편입된 확정분이라 되돌릴 대상이 아니다.
+//   - 남이 제출한 건: user_id 로 본인 제출분만 되돌린다 (제출과 같은 조건).
+export async function unsubmitExpenses(siteId: string, yearMonth: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { data: openRound } = await supabase
+    .from('settlement_rounds')
+    .select('period_start, period_end')
+    .eq('site_id', siteId)
+    .eq('status', 'open')
+    .maybeSingle()
+
+  let query = supabase
+    .from('expenses')
+    .update({ status: 'draft' })
+    .eq('site_id', siteId)
+    .eq('user_id', user.id)
+    .eq('status', 'submitted')
+    .is('settlement_round_id', null)
+    .is('deleted_at', null)
+  query = openRound
+    ? query.in('year_month', monthsBetween(openRound.period_start, openRound.period_end))
+    : query.eq('year_month', yearMonth)
+
+  const { data, error } = await query.select('id')
+  if (error) return { error: `제출 취소 실패: ${error.message}` }
+  // 0건이면 되돌릴 게 없다는 뜻 — 본사가 이미 승인·반려했거나 회차에 편입된 상태다.
+  // 성공으로 넘기면 화면은 풀린 것처럼 보이는데 저장은 계속 막혀 원인을 찾을 수 없다.
+  if (!data || data.length === 0) {
+    return { error: '되돌릴 제출분이 없습니다 — 본사가 이미 승인·반려했거나 기성회차에 편입된 내역입니다.' }
+  }
+
+  revalidatePath('/expenses')
+  revalidatePath('/expenses/staff-costs/resident')
+  revalidatePath('/expenses/staff-costs/support')
+  revalidatePath('/dashboard')
+  revalidatePath('/settlement')
+  return { success: true, reverted: data.length }
 }

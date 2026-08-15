@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Trash2, Send, ChevronDown, ChevronUp, Receipt } from 'lucide-react'
+import { Trash2, Send, ChevronDown, ChevronUp, Receipt, Undo2 } from 'lucide-react'
 import { EXPENSE_CATEGORY_LABELS, EXPENSE_SUBCATEGORIES, type ExpenseCategory } from '@/lib/constants'
-import { deleteExpense, submitExpenses } from '@/actions/expenses'
+import { deleteExpense, submitExpenses, unsubmitExpenses } from '@/actions/expenses'
 import { receiptHref } from '@/lib/storage/receipts'
 import { useRouter } from 'next/navigation'
 import type { Expense } from '@/types'
@@ -19,6 +19,8 @@ interface Props {
     draftCount: number; draftAmount: number
     /** 이미 제출·승인된 건 — 제출할 것이 없을 때 상태를 보여주기 위해 */
     sentCount: number; sentAmount: number
+    /** 제출 취소가 가능한 건 (검토중 + 회차 미편입) — 승인·반려분은 제외 */
+    revertibleCount: number; revertibleAmount: number
   } | null
 }
 
@@ -45,6 +47,7 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft, round = nul
   const [isPending, startTransition] = useTransition()
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [submitConfirm, setSubmitConfirm] = useState(false)
+  const [unsubmitConfirm, setUnsubmitConfirm] = useState(false)
   const [message, setMessage] = useState('')
   // 삭제 확인은 화면 안에서 받는다 — window.confirm은 미리보기 패널 등 일부 환경에서
   // 대화상자 없이 즉시 false를 반환해 "눌러도 아무 일 없는" 상태가 된다.
@@ -65,6 +68,20 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft, round = nul
       const result = await submitExpenses(siteId, yearMonth)
       if (result.error) setMessage(result.error)
       else { setMessage('본사에 제출됐습니다!'); setSubmitConfirm(false); router.refresh() }
+    })
+  }
+
+  // 제출 취소 — 제출하면 회차 전체의 주재비·현장경비 저장이 서버에서 막히는데, 되돌리는
+  // 경로가 본사 반려뿐이었다. 잘못 눌렀을 때 현장이 스스로 풀 수 있어야 한다.
+  const handleUnsubmit = () => {
+    startTransition(async () => {
+      const result = await unsubmitExpenses(siteId, yearMonth)
+      if (result.error) setMessage(result.error)
+      else {
+        setMessage(`제출을 취소했습니다 — ${result.reverted ?? 0}건이 작성중으로 돌아갔습니다. 다시 수정·저장할 수 있습니다.`)
+        setUnsubmitConfirm(false)
+        router.refresh()
+      }
     })
   }
 
@@ -141,6 +158,36 @@ export function ExpenseList({ expenses, siteId, yearMonth, hasDraft, round = nul
                   {round.label} <b>{round.sentCount}건 · {round.sentAmount.toLocaleString()}원</b>을 본사에 제출했습니다 —
                   본사 검토 후 승인됩니다. 새로 입력한 항목이 생기면 여기에서 제출합니다.
                 </p>
+                {/* 제출하면 회차 전체 월의 주재비·출장비 저장이 막힌다 — 잘못 눌렀을 때
+                    본사 반려를 기다리지 않고 현장이 스스로 풀 수 있어야 한다.
+                    승인·반려된 건과 회차 편입분은 되돌릴 수 없으므로 버튼도 나오지 않는다. */}
+                {round.revertibleCount > 0 && (
+                  unsubmitConfirm ? (
+                    <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                      <p className="text-xs text-amber-800">
+                        검토중 <b>{round.revertibleCount}건 · {round.revertibleAmount.toLocaleString()}원</b>을
+                        작성중으로 되돌립니다. 본사 검토 목록에서 사라지고, 수정 후 다시 제출해야 합니다.
+                      </p>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={handleUnsubmit} disabled={isPending}
+                          className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50">
+                          {isPending ? '취소 중...' : '제출 취소 확인'}
+                        </button>
+                        <button type="button" onClick={() => setUnsubmitConfirm(false)}
+                          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+                          그대로 두기
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setUnsubmitConfirm(true)}
+                      title="검토중인 제출분을 작성중으로 되돌려 다시 수정할 수 있게 합니다 (승인·반려된 건은 제외)"
+                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50">
+                      <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      제출 취소 ({round.revertibleCount}건) — 다시 수정하려면
+                    </button>
+                  )
+                )}
               </>
             ) : (
               <>

@@ -55,6 +55,8 @@ export default async function ExpensesPage({
     label: string; no: number
     draftCount: number; draftAmount: number
     sentCount: number; sentAmount: number
+    /** 제출 취소가 가능한 건 (검토중 + 회차 미편입) */
+    revertibleCount: number; revertibleAmount: number
     totalCount: number; totalAmount: number
   } | null = null
   if (selectedSiteId) {
@@ -81,7 +83,7 @@ export default async function ExpensesPage({
       // 상태를 함께 읽어 draft(제출 대상)와 회차 전체(요약 카드)를 한 번의 조회로 나눈다
       const { data: roundRows } = await supabase
         .from('expenses')
-        .select('amount, over_limit_amount, status')
+        .select('amount, over_limit_amount, status, settlement_round_id')
         .eq('site_id', selectedSiteId)
         .eq('user_id', user.id)
         .is('deleted_at', null)
@@ -91,6 +93,9 @@ export default async function ExpensesPage({
         e.amount - (e.over_limit_amount ?? 0)
       const drafts = rows.filter((e) => e.status === 'draft')
       const sent = rows.filter((e) => e.status === 'submitted' || e.status === 'approved')
+      // 제출 취소가 가능한 건 — 본사가 아직 손대지 않고(submitted) 회차에도 편입되지 않은 것.
+      // unsubmitExpenses의 조건과 같아야 "취소 버튼이 있는데 눌러도 0건"이 생기지 않는다.
+      const revertible = rows.filter((e) => e.status === 'submitted' && !e.settlement_round_id)
       round = {
         label: `${openRound.round_no}회차 (${openRound.period_start} ~ ${openRound.period_end})`,
         no: openRound.round_no,
@@ -98,6 +103,8 @@ export default async function ExpensesPage({
         draftAmount: drafts.reduce((s, e) => s + recognized(e), 0),
         sentCount: sent.length,
         sentAmount: sent.reduce((s, e) => s + recognized(e), 0),
+        revertibleCount: revertible.length,
+        revertibleAmount: revertible.reduce((s, e) => s + recognized(e), 0),
         totalCount: rows.length,
         totalAmount: rows.reduce((s, e) => s + recognized(e), 0),
       }

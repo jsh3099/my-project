@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { StaffCostForm, type StaffCostDraftItem } from '@/components/expenses/StaffCostForm'
 import { SupportTripForm, type SupportTripDraft } from '@/components/expenses/SupportTripForm'
 import { getSiteBudgetStatus } from '@/lib/budgetStatus'
+import { calcCommute } from '@/lib/settlement'
 import type { StaffType, CommuteMode, VehicleFuelType } from '@/lib/constants'
 import { STAFF_TYPE_LABELS } from '@/lib/constants'
 import type { Site, Profile, AttendanceRecord, SiteStaffMember, SettlementRound, LodgingCalcDetail } from '@/types'
@@ -82,8 +83,8 @@ export async function StaffCostsPageContent({
   const roundMonths = openRound ? monthsOfRound(openRound) : []
   const roundYears = [...new Set(roundMonths.map((ym) => parseInt(ym.slice(0, 4), 10)))]
 
-  // 출근부 데이터 + 현장 기술인 명부
-  const [{ data: attendanceData }, { data: membersData }] = await Promise.all([
+  // 출근부 데이터 + 현장 기술인 명부 + 출근부 첨부(증빙) 유무
+  const [{ data: attendanceData }, { data: membersData }, { data: sheetData }] = await Promise.all([
     openRound
       ? supabase
           .from('attendance_records')
@@ -104,6 +105,11 @@ export async function StaffCostsPageContent({
       .eq('is_active', true)
       .order('sort_order')
       .order('created_at'),
+    // 출근부 스캔 첨부 — 식대·교통비의 필수 증빙이라, 없으면 두 비목을 계상하지 않는다
+    // (서버도 createStaffCosts에서 같은 기준으로 0 처리한다)
+    openRound
+      ? admin.from('attendance_sheets').select('year, month, file_urls').eq('site_id', siteId).eq('staff_type', staffType).in('year', roundYears)
+      : admin.from('attendance_sheets').select('year, month, file_urls').eq('site_id', siteId).eq('staff_type', staffType).eq('year', parseInt(year, 10)).eq('month', month),
   ])
 
   // 회차 기준이면 인원별로 합산(출근일수 합계는 시작 월 레코드에 있고, 방문일은 월별로 흩어져 있다)
@@ -126,6 +132,14 @@ export async function StaffCostsPageContent({
     attendance = [...byPerson.values()]
   }
   const members = (membersData ?? []) as SiteStaffMember[]
+
+  // 회차 기간 안에 출근부 첨부가 한 부라도 있으면 증빙이 있는 것으로 본다
+  // (upsertAttendance가 회차 전체 월에 같은 첨부를 기록하므로 어느 월에서 읽어도 같다)
+  const sheetRows = (sheetData ?? []) as { year: number; month: number; file_urls: string[] | null }[]
+  const hasAttendanceDoc = sheetRows.some((s) => {
+    if (openRound && !roundMonths.includes(`${s.year}-${pad(s.month)}`)) return false
+    return (s.file_urls ?? []).length > 0
+  })
 
   // 이미 저장한 주재비 — 영수증을 올릴 때마다 저장해 나가는 흐름이라
   // 재진입 시 금액·건별 내역·첨부가 폼에 그대로 복원되어야 한다.
@@ -193,6 +207,17 @@ export async function StaffCostsPageContent({
             fuelPriceDate: commute.fuel_price_date,
             tollRoundtrip: commute.toll_roundtrip,
             multiplier: commute.multiplier,
+            // 1회 왕복비는 저장된 산출 파라미터로 다시 계산한다 — 종전처럼 amount ÷ multiplier로
+            // 되돌리면, 증빙을 떼서 금액이 0이 된 순간 단가까지 0으로 굳어 증빙을 다시 붙여도
+            // 복원되지 않는다. 파라미터는 증빙과 무관하게 남아 있으므로 여기서 항상 되살린다.
+            costPerTrip: calcCommute({
+              mode: 'lodging_return',
+              distanceOnewayKm: commute.distance_oneway_km,
+              fuelEfficiency: commute.fuel_efficiency,
+              fuelPrice: commute.fuel_price,
+              tollRoundtrip: commute.toll_roundtrip,
+              multiplier: 1,
+            }).costPerTrip,
           }
         : null,
     }
@@ -334,6 +359,7 @@ export async function StaffCostsPageContent({
           myHomeAddress={me?.home_address}
           myFuelType={me?.vehicle_fuel_type}
           categoryRemaining={categoryRemaining}
+          hasAttendanceDoc={hasAttendanceDoc}
         />
       )}
     </div>

@@ -7,6 +7,11 @@ import type { StaffType, ResidenceType } from '@/lib/constants'
 import { extractPdfLines, parseResidentDays, parseSupportVisits } from '@/lib/attendance/parseSheet'
 import { parseResidenceAddress } from '@/lib/receipts/parseReceipt'
 import { RECEIPTS_BUCKET, receiptStoragePath, receiptStoredValue } from '@/lib/storage/receipts'
+import {
+  loadRecalcContext,
+  recalcMemberAcrossMonths,
+  recalcStaffCostAmounts,
+} from '@/lib/expenses/recalcStaffCosts'
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
@@ -171,9 +176,47 @@ export async function upsertAttendance(formData: FormData) {
     if (error) return { error: '출근부 저장에 실패했습니다: ' + error.message }
   }
 
+  // ── 4. 출근부에서 파생된 금액 재계산 (식대·교통비) ──
+  // 출근부는 식대(일수 × 한도)와 출퇴근 교통비(1회 왕복비 × 일수)의 근거다. 종전에는 이 액션이
+  // expenses 를 전혀 건드리지 않아, 출근부 첨부나 일수를 지워도 저장된 금액이 그대로 남았다
+  // (주재비 폼은 화면에서 0원으로 보이는데 정산서·대시보드는 옛 금액 — 재저장 전까지 어긋남).
+  // 상주만 해당한다 — 기술지원은 출장비 경로라 계산 규칙이 다르다.
+  if (staff_type === 'resident') {
+    const admin = createAdminClient()
+    // expenses 는 인원을 target_user_name 으로 식별한다 (명부 인원은 로그인 계정이 없다)
+    const memberIds = [...new Set(memberRows.map((r) => r.member_id).filter((v): v is string => !!v))]
+    const nameById = new Map<string, string>()
+    if (memberIds.length > 0) {
+      const { data: mem } = await admin.from('site_staff_members').select('id, name').in('id', memberIds)
+      for (const m of (mem ?? []) as { id: string; name: string }[]) nameById.set(m.id, m.name)
+    }
+    for (const ym of months) {
+      const [y, m] = ym.split('-').map(Number)
+      const ctx = await loadRecalcContext(admin, site_id, y, m)
+      const workDaysByName: Record<string, number> = {}
+      for (const r of memberRows) {
+        if (r.year !== y || r.month !== m || !r.member_id) continue
+        const name = nameById.get(r.member_id)
+        if (name) workDaysByName[name] = r.work_days
+      }
+      const res = await recalcStaffCostAmounts(admin, {
+        siteId: site_id,
+        year: y,
+        month: m,
+        mealDailyLimit: ctx.mealDailyLimit,
+        hasAttendanceDoc: ctx.hasAttendanceDoc,
+        residenceDocByName: ctx.residenceDocByName,
+        workDaysByName,
+      })
+      if ('error' in res) return { error: res.error }
+    }
+  }
+
   revalidatePath('/attendance')
   revalidatePath('/expenses/staff-costs/resident')
   revalidatePath('/expenses/staff-costs/support')
+  revalidatePath('/dashboard')
+  revalidatePath('/settlement')
   return { success: true }
 }
 
@@ -310,7 +353,7 @@ export async function uploadResidenceDoc(memberId: string, formData: FormData) {
 
   const { data: member } = await supabase
     .from('site_staff_members')
-    .select('id, site_id, residence_doc_urls, home_address')
+    .select('id, site_id, name, residence_doc_urls, home_address')
     .eq('id', memberId)
     .maybeSingle()
   if (!member) return { error: '명부 인원을 찾을 수 없습니다.' }
@@ -366,10 +409,17 @@ export async function uploadResidenceDoc(memberId: string, formData: FormData) {
     .eq('id', memberId)
   if (error) return { error: '거주지 증빙 저장에 실패했습니다: ' + error.message }
 
+  // 증빙이 돌아오면 보류됐던 교통비도 되살린다 — 산출 파라미터(commute_calcs)를 지우지 않고
+  // 두었으므로 거리·유가를 다시 조회할 필요 없이 원래 1회 왕복비가 그대로 복원된다.
+  const recalc = await recalcMemberAcrossMonths(createAdminClient(), member.site_id, member.name)
+  if ('error' in recalc) return { error: recalc.error }
+
   revalidatePath('/attendance')
   revalidatePath('/expenses/staff-costs/resident')
   revalidatePath('/expenses/staff-costs/support')
-  return { success: true, parsedAddress, previousAddress, applied }
+  revalidatePath('/dashboard')
+  revalidatePath('/settlement')
+  return { success: true, parsedAddress, previousAddress, applied, recalculated: recalc.updated }
 }
 
 // 이미 첨부된 거주지 증빙에서 자택주소를 다시 인식한다.
@@ -459,19 +509,34 @@ export async function removeResidenceDoc(memberId: string, url: string) {
 
   const { data: member } = await supabase
     .from('site_staff_members')
-    .select('id, residence_doc_urls')
+    .select('id, site_id, name, residence_doc_urls')
     .eq('id', memberId)
     .maybeSingle()
   if (!member) return { error: '명부 인원을 찾을 수 없습니다.' }
 
+  const remaining = (member.residence_doc_urls ?? []).filter((u: string) => u !== url)
   const { error } = await supabase
     .from('site_staff_members')
-    .update({ residence_doc_urls: (member.residence_doc_urls ?? []).filter((u: string) => u !== url) })
+    .update({ residence_doc_urls: remaining })
     .eq('id', memberId)
   if (error) return { error: '거주지 증빙 제거에 실패했습니다: ' + error.message }
 
+  // 거주지 증빙은 교통비 산출의 자택주소 근거다 — 마지막 1부를 떼면 이미 저장된 교통비도
+  // 청구할 수 없게 되므로 금액을 0으로 내린다. 종전에는 파일 참조만 끊고 끝나서
+  // 1회 왕복비와 저장 금액이 근거 없이 살아남았다.
+  //
+  // 자택주소(home_address)와 산출 파라미터(commute_calcs)는 지우지 않는다 — 증빙을 다시
+  // 붙였을 때 거리·유가를 재조회하지 않고 곧바로 복원되어야 하고, 손으로 고쳐 넣은 주소를
+  // 증빙 삭제가 지워버리면 안 되기 때문이다.
+  const recalc = await recalcMemberAcrossMonths(createAdminClient(), member.site_id, member.name)
+  if ('error' in recalc) return { error: recalc.error }
+
   revalidatePath('/attendance')
-  return { success: true }
+  revalidatePath('/expenses/staff-costs/resident')
+  revalidatePath('/expenses/staff-costs/support')
+  revalidatePath('/dashboard')
+  revalidatePath('/settlement')
+  return { success: true, recalculated: recalc.updated, remaining: remaining.length }
 }
 
 // 명부 인원 제외 (비활성화 — 과거 출근부 기록은 보존)
