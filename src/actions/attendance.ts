@@ -191,15 +191,19 @@ export async function upsertAttendance(formData: FormData) {
       const { data: mem } = await admin.from('site_staff_members').select('id, name').in('id', memberIds)
       for (const m of (mem ?? []) as { id: string; name: string }[]) nameById.set(m.id, m.name)
     }
+    // 상주 일수는 「회차 전체 합계」가 시작 월 레코드에만 저장되고 나머지 월은 0이다.
+    // 그런데 식대·교통비 저장 행은 조회 월(대개 회차 마지막 달)에 있으므로, 그 달의 레코드
+    // 값(0)을 그대로 쓰면 출근부를 다시 붙여도 복원되지 않는다(실측: 첨부 후에도 0원 유지).
+    // 식대·교통비 산출 기준 자체가 회차 전체 일수이므로, 인원별 합계를 모든 달에 적용한다.
+    const totalDaysByName: Record<string, number> = {}
+    for (const r of memberRows) {
+      if (!r.member_id) continue
+      const name = nameById.get(r.member_id)
+      if (name) totalDaysByName[name] = (totalDaysByName[name] ?? 0) + r.work_days
+    }
     for (const ym of months) {
       const [y, m] = ym.split('-').map(Number)
       const ctx = await loadRecalcContext(admin, site_id, y, m)
-      const workDaysByName: Record<string, number> = {}
-      for (const r of memberRows) {
-        if (r.year !== y || r.month !== m || !r.member_id) continue
-        const name = nameById.get(r.member_id)
-        if (name) workDaysByName[name] = r.work_days
-      }
       const res = await recalcStaffCostAmounts(admin, {
         siteId: site_id,
         year: y,
@@ -207,7 +211,7 @@ export async function upsertAttendance(formData: FormData) {
         mealDailyLimit: ctx.mealDailyLimit,
         hasAttendanceDoc: ctx.hasAttendanceDoc,
         residenceDocByName: ctx.residenceDocByName,
-        workDaysByName,
+        workDaysByName: totalDaysByName,
       })
       if ('error' in res) return { error: res.error }
     }

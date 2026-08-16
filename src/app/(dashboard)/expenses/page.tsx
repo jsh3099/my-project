@@ -91,7 +91,9 @@ export default async function ExpensesPage({
       const rows = roundRows ?? []
       const recognized = (e: { amount: number; over_limit_amount: number | null }) =>
         e.amount - (e.over_limit_amount ?? 0)
-      const drafts = rows.filter((e) => e.status === 'draft')
+      // 0원 행은 제출 대상이 아니다 (증빙 게이트가 입력값 보존용으로 남긴 행 — submitExpenses도 같은 조건).
+      // 여기서 함께 걸러야 배너의 「N건 제출합니다」와 실제 제출 건수가 일치한다.
+      const drafts = rows.filter((e) => e.status === 'draft' && e.amount > 0)
       const sent = rows.filter((e) => e.status === 'submitted' || e.status === 'approved')
       // 제출 취소가 가능한 건 — 본사가 아직 손대지 않고(submitted) 회차에도 편입되지 않은 것.
       // unsubmitExpenses의 조건과 같아야 "취소 버튼이 있는데 눌러도 0건"이 생기지 않는다.

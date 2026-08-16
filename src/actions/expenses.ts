@@ -1182,6 +1182,10 @@ export async function submitExpenses(siteId: string, yearMonth: string) {
     .eq('site_id', siteId)
     .eq('user_id', user.id)
     .eq('status', 'draft')
+    // 계상 0원 행은 제출하지 않는다 — 증빙 게이트가 입력값 보존용으로 남긴 행(증빙 없어 0원)이라
+    // 청구할 금액이 없고, DB 제약(amount > 0 OR status = 'draft')상 draft로만 존재할 수 있다.
+    // 이걸 거르지 않으면 0원 행 하나 때문에 제출 전체가 제약 위반으로 실패한다.
+    .gt('amount', 0)
     .is('deleted_at', null)
   query = openRound
     ? query.in('year_month', monthsBetween(openRound.period_start, openRound.period_end))
