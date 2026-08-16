@@ -10,6 +10,10 @@ import {
   claimableCommute,
   claimableCostPerTrip,
   claimableMeal,
+  claimableReceiptBased,
+  claimableSupportTrip,
+  receiptBlockReason,
+  supportTripBlockReason,
   type StaffEvidence,
 } from '@/lib/expenses/evidenceGate'
 import { loadRecalcContext } from '@/lib/expenses/recalcStaffCosts'
@@ -348,15 +352,29 @@ export async function createStaffCosts(formData: FormData) {
     subcategory: string,
     category: string,
     amount: number,
-    opts: { workingDays?: number | null; amountGross?: number | null; vatMode?: 'none' | 'exclude_10'; calcDetail?: object | null; child?: ChildPayload } = {},
+    opts: {
+      workingDays?: number | null
+      amountGross?: number | null
+      vatMode?: 'none' | 'exclude_10'
+      calcDetail?: object | null
+      child?: ChildPayload
+      /** 영수증 기반 비목(숙소임대비·관리비) — 이 행에 영수증이 없으면 계상하지 않는다 */
+      requireReceipt?: boolean
+      /** 증빙이 없어 0이 된 경우 — 행을 지우지 않고 입력값·산출 근거를 보존한다 (재첨부 시 복원) */
+      preserveOnZero?: boolean
+    } = {},
   ) {
     const identity = row.userId || row.userName
     const existing = findExisting(identity, subcategory, row.periodStart)
     // 화면에 남아있는 기존 첨부 + 이번에 올린 신규 첨부 (중복 URL 제거)
     const finalReceipts = [...new Set([...keptFor(row.rowId, subcategory), ...receiptsFor(row.rowId, subcategory)])]
-    if (amount > 0) {
+    // 영수증 게이트 — 입력값이 있어도 영수증이 없으면 계상 0 (식대·교통비 게이트와 같은 원칙)
+    const claimable = opts.requireReceipt ? claimableReceiptBased(amount, finalReceipts.length) : amount
+    // 게이트로 0이 된 행은 입력값이 살아 있다는 뜻 — 아래에서 근거를 보존한다
+    const gatedZero = amount > 0 && claimable <= 0
+    if (claimable > 0) {
       const common = {
-        amount,
+        amount: claimable,
         amount_gross: opts.amountGross ?? null,
         vat_mode: opts.vatMode ?? 'none',
         working_days: opts.workingDays ?? null,
@@ -375,10 +393,26 @@ export async function createStaffCosts(formData: FormData) {
         if (opts.child) pendingChildren.push({ insertIndex: inserts.length - 1, child: opts.child })
       }
     } else if (existing) {
-      // 첨부만 먼저 올려둔 행(금액 0)은 지우지 않는다 — 지우면 업로드한 영수증이 함께 사라진다.
-      // 다만 금액이 0이면 사용금액·건별 내역·산출근거도 함께 비워야 한다
-      // (자가 출퇴근으로 바뀐 인원의 관리비 gross·내역이 남아 유령 금액으로 보이는 것을 막는다)
-      if (finalReceipts.length > 0) {
+      if (gatedZero || opts.preserveOnZero) {
+        // 증빙이 없어 계상하지 못하는 행 — 금액만 0으로 두고 입력값(calc_detail)과 자식
+        // (건별 내역·교통비 산출)을 보존한다. 지우면 증빙을 다시 붙여도 복원할 근거가 없다.
+        updates.push({
+          id: existing.id,
+          patch: {
+            amount: 0,
+            amount_gross: null,
+            vat_mode: opts.vatMode ?? 'none',
+            working_days: opts.workingDays ?? null,
+            calc_detail: opts.calcDetail ?? null,
+            receipt_urls: finalReceipts,
+          },
+        })
+        if (opts.child) pendingChildren.push({ expenseId: existing.id, child: opts.child })
+        // child 미전달이면 기존 자식을 그대로 둔다 — 복원 근거를 지우지 않는다
+      } else if (finalReceipts.length > 0) {
+        // 첨부만 먼저 올려둔 행(입력값 없는 금액 0)은 지우지 않는다 — 지우면 업로드한 영수증이 함께 사라진다.
+        // 다만 사용금액·건별 내역·산출근거는 함께 비운다
+        // (자가 출퇴근으로 바뀐 인원의 관리비 gross·내역이 남아 유령 금액으로 보이는 것을 막는다)
         updates.push({
           id: existing.id,
           patch: { amount: 0, amount_gross: null, vat_mode: 'none', calc_detail: null, receipt_urls: finalReceipts },
@@ -400,9 +434,11 @@ export async function createStaffCosts(formData: FormData) {
         row.userName in evidenceCtx.residenceDocByName ? evidenceCtx.residenceDocByName[row.userName] : true,
     }
 
-    // 식대: 근무일수 × 단가 (서버에서 재계산) — 출근부가 없으면 계상하지 않는다
+    // 식대: 근무일수 × 단가 (서버에서 재계산) — 출근부가 없으면 계상하지 않는다.
+    // 출근부가 없어 0이 된 경우에는 행을 지우지 않는다 — 재첨부 시 재계산 경로가 이 행을 되살린다
     reconcile(row, 'meal', 'site_residence', claimableMeal(row.workDays, mealLimit, evidence), {
       workingDays: row.workDays || null,
+      preserveOnZero: !evidence.hasAttendanceDoc && row.workDays > 0,
     })
 
     // 자가 출퇴근자(출퇴근형)는 숙소비 대상이 아니다 — 클라이언트가 값을 보내도 0으로 확정한다
@@ -415,8 +451,11 @@ export async function createStaffCosts(formData: FormData) {
       : row.lodgingCalcDetail?.contractType === 'jeonse'
         ? convertJeonseToMonthly(row.lodgingCalcDetail.deposit ?? 0, row.lodgingCalcDetail.conversionRatePct ?? 0)
         : row.lodgingRent
+    // 임대비·관리비는 그 행의 영수증(이체확인증·납입확인서)이 필수 증빙 — 없으면 계상 0,
+    // 입력값은 calc_detail·건별 내역에 보존되어 영수증을 붙이면 복원된다
     reconcile(row, 'lodging_rent', 'site_residence', lodgingAmount, {
       calcDetail: commuter ? null : row.lodgingCalcDetail,
+      requireReceipt: true,
     })
 
     // 관리비: 건별 내역 합계 → VAT제외 적용금액 (서버 재계산)
@@ -426,6 +465,7 @@ export async function createStaffCosts(formData: FormData) {
       amountGross: maint.grossTotal || null,
       vatMode: 'exclude_10',
       child: { maintItems },
+      requireReceipt: true,
     })
 
     // 교통비: 1회 왕복비 × (숙박형: 주말 왕복 횟수 / 출퇴근형: 근무일수) — 산출 파라미터가 있으면 서버 재계산
@@ -450,6 +490,8 @@ export async function createStaffCosts(formData: FormData) {
       workingDays: row.workDays || null,
       calcDetail: { mode: row.commuteMode, costPerTrip: claimableCostPerTrip(costPerTrip, evidence), multiplier },
       child: row.commuteCalc ? { commuteCalc: row.commuteCalc, commuteMultiplier: multiplier, commuteMode: row.commuteMode } : undefined,
+      // 산출 파라미터가 있는 한 0원이 되어도 행을 지우지 않는다 — commute_calcs가 복원 근거다
+      preserveOnZero: row.commuteCalc != null || costPerTrip > 0,
     })
   }
 
@@ -619,7 +661,78 @@ async function findOrCreateStaffCostDraft(
   return { id: created.id, receiptUrls: created.receipt_urls ?? [] }
 }
 
-// (A) 첨부 즉시 업로드 — 금액은 건드리지 않는다. 반환한 URL로 화면이 링크를 그린다.
+// ── 영수증 게이트 (임대비·관리비) — 첨부가 곧 증빙이라, 첨부 유무가 계상 여부를 정한다 ──
+
+// 마지막 영수증이 떨어진 행의 금액을 0으로 — 입력값은 calc_detail·건별 내역에 남겨
+// 재첨부 시 복원한다. calc_detail이 없는 옛 행은 지우기 전에 금액을 calc_detail로 옮겨 보존한다.
+async function gateStaffCostOnDetach(
+  admin: ReturnType<typeof createAdminClient>,
+  expenseId: string,
+  subcategory: 'lodging_rent' | 'lodging_maintenance',
+): Promise<void> {
+  const { data: row } = await admin
+    .from('expenses')
+    .select('amount, calc_detail')
+    .eq('id', expenseId)
+    .maybeSingle()
+  if (!row || (row.amount ?? 0) <= 0) return
+  const detail =
+    subcategory === 'lodging_rent'
+      ? ((row.calc_detail as LodgingCalcDetail | null) ?? { contractType: 'monthly' as const, monthlyRent: row.amount })
+      : (row.calc_detail as object | null)
+  await admin
+    .from('expenses')
+    .update({ amount: 0, amount_gross: null, calc_detail: detail })
+    .eq('id', expenseId)
+}
+
+// 첫 영수증이 붙은 행의 금액을 보존된 입력값으로 복원한다. 복원 금액을 돌려준다 (없으면 null)
+async function restoreStaffCostOnAttach(
+  admin: ReturnType<typeof createAdminClient>,
+  expenseId: string,
+  subcategory: 'lodging_rent' | 'lodging_maintenance',
+): Promise<number | null> {
+  const { data: row } = await admin
+    .from('expenses')
+    .select('amount, calc_detail, expense_items(amount_gross)')
+    .eq('id', expenseId)
+    .maybeSingle()
+  if (!row || (row.amount ?? 0) > 0) return null
+
+  if (subcategory === 'lodging_rent') {
+    const d = row.calc_detail as LodgingCalcDetail | null
+    const amount =
+      d?.contractType === 'jeonse'
+        ? convertJeonseToMonthly(d.deposit ?? 0, d.conversionRatePct ?? 0)
+        : (d?.monthlyRent ?? 0)
+    if (amount <= 0) return null
+    const { error } = await admin.from('expenses').update({ amount }).eq('id', expenseId)
+    return error ? null : amount
+  }
+
+  const grosses = ((row.expense_items ?? []) as { amount_gross: number }[])
+    .map((i) => i.amount_gross)
+    .filter((v) => v > 0)
+  if (grosses.length === 0) return null
+  const calc = calcItemized(grosses.map((amountGross) => ({ amountGross })), 'exclude_10')
+  if (calc.appliedTotal <= 0) return null
+  const { error } = await admin
+    .from('expenses')
+    .update({ amount: calc.appliedTotal, amount_gross: calc.grossTotal, vat_mode: 'exclude_10' })
+    .eq('id', expenseId)
+  return error ? null : calc.appliedTotal
+}
+
+// 금액이 바뀌는 첨부/삭제 뒤 — 요약·정산 화면이 옛 금액을 계속 보여주지 않게 한다
+function revalidateStaffCostViews() {
+  revalidatePath('/expenses')
+  revalidatePath('/expenses/staff-costs/resident')
+  revalidatePath('/dashboard')
+  revalidatePath('/settlement')
+}
+
+// (A) 첨부 즉시 업로드 — 입력 금액은 건드리지 않는다. 반환한 URL로 화면이 링크를 그린다.
+// 단, 영수증 게이트로 0이 되어 있던 임대비·관리비는 첫 영수증이 붙는 순간 보존값으로 복원된다.
 export async function attachStaffCostReceipt(formData: FormData) {
   const supabase = await createClient()
   const admin = createAdminClient()
@@ -657,7 +770,17 @@ export async function attachStaffCostReceipt(formData: FormData) {
   const merged = [...new Set([...draft.receiptUrls, ...added])]
   const { error } = await admin.from('expenses').update({ receipt_urls: merged }).eq('id', draft.id)
   if (error) return { error: `저장 실패: ${error.message}` }
-  return { urls: merged, added }
+
+  // 영수증 게이트 복원 — 영수증이 없어 0으로 계상돼 있던 임대비·관리비를 보존값으로 되살린다
+  let restoredAmount: number | null = null
+  if (
+    draft.receiptUrls.length === 0 &&
+    (target.subcategory === 'lodging_rent' || target.subcategory === 'lodging_maintenance')
+  ) {
+    restoredAmount = await restoreStaffCostOnAttach(admin, draft.id, target.subcategory)
+    if (restoredAmount !== null) revalidateStaffCostViews()
+  }
+  return { urls: merged, added, restoredAmount }
 }
 
 // 첨부 개별 삭제 — 화면의 ✕ 즉시 반영
@@ -675,7 +798,18 @@ export async function detachStaffCostReceipt(formData: FormData) {
   const merged = draft.receiptUrls.filter((u) => u !== url)
   const { error } = await admin.from('expenses').update({ receipt_urls: merged }).eq('id', draft.id)
   if (error) return { error: `삭제 실패: ${error.message}` }
-  return { urls: merged }
+
+  // 영수증 게이트 — 마지막 영수증이 떨어진 임대비·관리비는 계상 0 (입력값은 보존, 재첨부 시 복원)
+  let gatedZero = false
+  if (
+    merged.length === 0 &&
+    (target.subcategory === 'lodging_rent' || target.subcategory === 'lodging_maintenance')
+  ) {
+    await gateStaffCostOnDetach(admin, draft.id, target.subcategory)
+    gatedZero = true
+    revalidateStaffCostViews()
+  }
+  return { urls: merged, gatedZero }
 }
 
 // (C) 비목 1건 저장 — 금액·건별 내역만 확정하고 첨부는 건드리지 않는다.
@@ -719,11 +853,16 @@ export async function saveStaffCostItem(formData: FormData) {
     return { error: '이 비목은 아직 단건 저장을 지원하지 않습니다.' }
   }
 
+  // 영수증 게이트 — 이 행에 영수증이 한 장도 없으면 계상하지 않는다.
+  // 입력값(calc_detail·건별 내역)은 그대로 저장하므로 영수증을 붙이면 재입력 없이 복원된다.
+  const claimable = claimableReceiptBased(amount, draft.receiptUrls.length)
+  const blocked = amount > 0 && claimable <= 0 ? receiptBlockReason(draft.receiptUrls.length) : null
+
   const { error } = await admin
     .from('expenses')
     .update({
-      amount,
-      amount_gross: amountGross,
+      amount: claimable,
+      amount_gross: claimable > 0 ? amountGross : null,
       vat_mode: vatMode,
       calc_detail: calcDetail,
       target_user_name: target.userName,
@@ -752,7 +891,7 @@ export async function saveStaffCostItem(formData: FormData) {
     }
   }
 
-  return { amount }
+  return { amount: claimable, blocked }
 }
 
 // 이미 저장된 영수증에서 금액을 다시 인식한다.
@@ -860,6 +999,20 @@ export async function createSupportTrips(formData: FormData) {
   const dailyAllowance = siteParams?.trip_daily_allowance ?? 25000
   const mealAllowance = siteParams?.trip_meal_allowance ?? 25000
 
+  // 기술지원 출근부(스캔 첨부)가 필수 증빙 — 없으면 출장비를 계상하지 않는다 (일비·식비도
+  // 방문 사실이 근거다). 방문일·거리·유가(trip_visits)는 그대로 저장하므로, 출근부를 다시
+  // 붙이면 재입력 없이 복원된다. 출근부 첨부는 회차 전체 월에 동일하게 기록되므로
+  // (upsertAttendance) 이 연월 한 곳만 보면 된다.
+  const { data: supportSheet } = await admin
+    .from('attendance_sheets')
+    .select('file_urls')
+    .eq('site_id', siteId)
+    .eq('year', yr)
+    .eq('month', mo)
+    .eq('staff_type', 'support')
+    .maybeSingle()
+  const hasSupportDoc = ((supportSheet?.file_urls ?? []) as string[]).length > 0
+
   // 지도 캡처 업로드 (receipt::rowId::support_trip)
   const receiptUrlsByRow: Record<string, string[]> = {}
   for (const key of formData.keys()) {
@@ -932,7 +1085,8 @@ export async function createSupportTrips(formData: FormData) {
     const newReceipts = receiptUrlsByRow[row.rowId] ?? []
 
     const common = {
-      amount: total,
+      // 출근부 게이트 — 증빙이 없으면 계상 0 (방문일별 산출은 trip_visits에 보존된다)
+      amount: claimableSupportTrip(total, hasSupportDoc),
       working_days: visits.length,
       target_user_name: row.userName,
       specialty: row.specialty,
@@ -987,7 +1141,8 @@ export async function createSupportTrips(formData: FormData) {
     if (visitError) return { error: `방문 내역 저장 실패: ${visitError.message}` }
   }
 
-  return { success: true }
+  // 게이트로 0원 저장된 경우 — 저장은 성공했지만 계상되지 않았음을 화면이 알린다
+  return { success: true, blocked: supportTripBlockReason(hasSupportDoc) }
 }
 
 // 회차 기성기간에 걸치는 연월 목록 (최대 24개월 안전 상한)

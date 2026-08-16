@@ -15,6 +15,7 @@ import { calcCommuteCost } from '@/actions/commute'
 import type { AttendanceRecord, SiteStaffMember } from '@/types'
 import { SPECIALTIES, VEHICLE_FUEL_TYPE_LABELS, FUEL_EFFICIENCY, type VehicleFuelType } from '@/lib/constants'
 import { calcTripVisit } from '@/lib/settlement'
+import { claimableSupportTrip, supportTripBlockReason } from '@/lib/expenses/evidenceGate'
 import { receiptFileName, receiptHref } from '@/lib/storage/receipts'
 
 // 이미 저장한 draft 출장비 — 재진입 시 거리·유가·통행료가 복원되어야 한다.
@@ -44,6 +45,8 @@ interface Props {
   periodEnd?: string | null
   /** 출장비 비목의 계상 잔액 (계상 미입력이면 null) — 삭감 위험 사전 인지용 */
   categoryRemaining?: number | null
+  /** 기술지원 출근부 첨부 유무 — 출장비의 필수 증빙 (없으면 계상하지 않는다) */
+  hasAttendanceDoc?: boolean
 }
 
 const ACCEPT = '.jpg,.jpeg,.png,.pdf'
@@ -75,7 +78,7 @@ let rowSeq = 0
 
 function parseNum(v: string) { return parseInt(v.replace(/,/g, ''), 10) || 0 }
 
-export function SupportTripForm({ siteId, siteName, yearMonth, members, attendance, siteAddress, tripDailyAllowance = 25000, tripMealAllowance = 25000, existingDrafts = [], periodStart = null, periodEnd = null, categoryRemaining = null }: Props) {
+export function SupportTripForm({ siteId, siteName, yearMonth, members, attendance, siteAddress, tripDailyAllowance = 25000, tripMealAllowance = 25000, existingDrafts = [], periodStart = null, periodEnd = null, categoryRemaining = null, hasAttendanceDoc = false }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -237,8 +240,13 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
     return (parseFloat(r.distanceOneway) || 0) > 0 && parseNum(v.fuelPrice) > 0
   }
 
-  function rowTotal(r: PersonRow) {
+  // 산출 합계 (게이트 전) — 상태 칩·저장 payload 판정에 쓴다. 계상 여부와 무관하게 산출은 살아 있다.
+  function rawRowTotal(r: PersonRow) {
     return r.visits.reduce((s, v) => s + (visitCalc(r, v)?.total ?? 0), 0)
+  }
+  // 계상 금액 (게이트 후) — 출근부가 없으면 0. 화면 소계·합계는 이 값으로 그린다 (서버 저장과 동일 규칙)
+  function rowTotal(r: PersonRow) {
+    return claimableSupportTrip(rawRowTotal(r), hasAttendanceDoc)
   }
 
   // 카카오 길찾기 자동 산출 — 자택주소 ↔ 현장주소(sites.address, 주재비 시트에서 저장한 값)로
@@ -447,14 +455,18 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
     return <span className="whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">유가 확인</span>
   }
 
-  const pendingCount = rows.filter((r) => rowStatus(r, rowTotal(r)) === 'pending').length
+  const pendingCount = rows.filter((r) => rowStatus(r, rawRowTotal(r)) === 'pending').length
 
   // 카드도 주재비와 같은 이유로 렌더 함수 호출 방식 (JSX 태그로 쓰면 렌더마다 리마운트)
   function renderCard(r: PersonRow) {
+    const rawTotal = rawRowTotal(r)
     const total = rowTotal(r)
     const isOpen = openRows.has(r.id)
     const visitCount = r.visits.filter((v) => v.date).length
-    const status = rowStatus(r, total)
+    // 상태 칩은 산출값 기준 — 게이트로 0이어도 저장할 데이터는 있다 (계상 여부는 아래 안내가 말한다)
+    const status = rowStatus(r, rawTotal)
+    // 출근부가 없어 계상하지 못하는 이유 — 소계만 0이면 고장으로 읽힌다
+    const blocked = rawTotal > 0 ? supportTripBlockReason(hasAttendanceDoc) : null
 
     // ── 비목 요약 (교통비 / 일비 / 식비) ──
     // 정산기준·예본 2-1이 출장비를 이 세 항목으로 정의하는데, 방문일 표만으로는
@@ -517,6 +529,13 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
               className="rounded p-1 text-gray-300 hover:bg-red-50 hover:text-red-500">✕</button>
           </div>
         </div>
+
+        {/* 출근부 미첨부 — 방문일·거리·유가는 보존되므로 출근부를 붙이면 그대로 복원된다 */}
+        {blocked && (
+          <div className="border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800">
+            ⚠ {blocked} 방문일·거리·유가 산출({rawTotal.toLocaleString()}원)은 보존되어, 출근부 화면에서 스캔을 첨부하면 그대로 계상됩니다.
+          </div>
+        )}
 
         {isOpen && (
           <>

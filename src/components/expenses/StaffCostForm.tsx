@@ -32,7 +32,9 @@ import {
   claimableCommute,
   claimableCostPerTrip,
   claimableMeal,
+  claimableReceiptBased,
   evidenceBlockReason,
+  receiptBlockReason,
   type StaffEvidence,
 } from '@/lib/expenses/evidenceGate'
 import { CommuteCalcPanel, type CommuteApplyParams } from './CommuteCalcPanel'
@@ -191,7 +193,15 @@ const isCommuter = (r: Row) => r.commuteMode === 'daily_commute'
 const UNGATED: StaffEvidence = { hasAttendanceDoc: true, hasResidenceDoc: true }
 
 // 행별 파생값 계산 (미리보기용 — 저장 시 서버가 동일 규칙으로 재계산)
-function deriveRow(r: Row, mealDailyLimit: number, ev: StaffEvidence = UNGATED) {
+// receipts(임대비·관리비 영수증 수)를 넘기면 영수증 게이트까지 적용된 표시 금액이 나온다.
+// 저장 payload를 만들 때는 넘기지 않는다 — 서버가 게이트를 걸되 입력값은 보존해야 하므로
+// 클라이언트는 항상 원래 입력값을 보낸다.
+function deriveRow(
+  r: Row,
+  mealDailyLimit: number,
+  ev: StaffEvidence = UNGATED,
+  receipts?: { rent: number; maint: number },
+) {
   const wd = parseInt(r.workDays) || 0
   const meal = claimableMeal(wd, mealDailyLimit, ev)
   const rentInput = r.lodgingContract === 'jeonse'
@@ -199,9 +209,11 @@ function deriveRow(r: Row, mealDailyLimit: number, ev: StaffEvidence = UNGATED) 
     : parseNum(r.lodgingRent)
   const maintInput = r.maintItems.reduce((s, i) => s + parseNum(i.amountGross), 0)
   // 자가 출퇴근자는 입력값이 남아 있어도 계상하지 않는다 (서버도 같은 규칙으로 0 처리)
-  const lodgingRent = isCommuter(r) ? 0 : rentInput
+  const rentEligible = isCommuter(r) ? 0 : rentInput
+  const lodgingRent = receipts ? claimableReceiptBased(rentEligible, receipts.rent) : rentEligible
   const maintGross = isCommuter(r) ? 0 : maintInput
-  const maintApplied = maintGross > 0 ? applyVatExclusion(maintGross) : 0
+  const maintEligible = maintGross > 0 ? applyVatExclusion(maintGross) : 0
+  const maintApplied = receipts ? claimableReceiptBased(maintEligible, receipts.maint) : maintEligible
   // 출퇴근형인데 숙소비 입력이 남아 있으면 알려준다 (저장 시 정리됨)
   const staleLodging = isCommuter(r) ? rentInput + maintInput : 0
   const multiplier = r.commuteMode === 'daily_commute' ? wd : (parseInt(r.commuteTrips) || 0)
@@ -209,7 +221,9 @@ function deriveRow(r: Row, mealDailyLimit: number, ev: StaffEvidence = UNGATED) 
   // 증빙이 없어 계상하지 못하는 이유 — 카드에 그대로 띄운다 (금액만 0이면 고장으로 읽힌다)
   const mealBlocked = evidenceBlockReason(ev, 'meal')
   const commuteBlocked = evidenceBlockReason(ev, 'commute')
-  return { wd, meal, lodgingRent, maintGross, maintApplied, multiplier, commuteTotal, staleLodging, mealBlocked, commuteBlocked, subtotal: meal + lodgingRent + maintApplied + commuteTotal }
+  const rentBlocked = receipts && rentEligible > 0 ? receiptBlockReason(receipts.rent) : null
+  const maintBlocked = receipts && maintEligible > 0 ? receiptBlockReason(receipts.maint) : null
+  return { wd, meal, lodgingRent, maintGross, maintApplied, multiplier, commuteTotal, staleLodging, mealBlocked, commuteBlocked, rentBlocked, maintBlocked, subtotal: meal + lodgingRent + maintApplied + commuteTotal }
 }
 
 let extraIdSeq = 0
@@ -629,7 +643,14 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
       lodgingContract: jeonse ? 'jeonse' : 'monthly',
       deposit: jeonse ? (jeonse.deposit ?? 0).toLocaleString('ko-KR') : base.deposit,
       conversionRate: jeonse ? String(jeonse.conversionRatePct ?? '') : base.conversionRate,
-      lodgingRent: lodging && !jeonse ? lodging.amount.toLocaleString('ko-KR') : base.lodgingRent,
+      // 월세도 저장 금액이 아니라 계약정보(calc_detail)에서 복원한다 — 영수증 게이트로 금액이
+      // 0이 된 뒤에도 입력값은 살아 있어야, 영수증을 다시 붙였을 때 그대로 되살아난다
+      lodgingRent: lodging && !jeonse
+        ? (() => {
+            const v = lodging.calcDetail?.monthlyRent ?? lodging.amount
+            return v > 0 ? v.toLocaleString('ko-KR') : base.lodgingRent
+          })()
+        : base.lodgingRent,
       maintItems: maint
         ? maint.maintItems.map((i) => ({ date: i.date, tag: i.tag, amountGross: i.amountGross.toLocaleString('ko-KR') }))
         : base.maintItems,
@@ -685,6 +706,12 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
       if (Object.keys(bySub).length) out[p.key] = bySub
     }
     return out
+  })
+
+  // 임대비·관리비의 영수증 게이트용 — 그 행에 저장된 영수증 수 (표시 금액 전용, 저장 payload에는 안 쓴다)
+  const receiptCountsOf = (id: string) => ({
+    rent: ((savedReceipts[id] ?? {})['lodging_rent'] ?? []).length,
+    maint: ((savedReceipts[id] ?? {})['lodging_maintenance'] ?? []).length,
   })
 
   const [extraRows, setExtraRows] = useState<ExtraRow[]>([])
@@ -798,6 +825,11 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
         return
       }
       setSavedReceipts((p) => ({ ...p, [id]: { ...(p[id] ?? {}), [subcategory]: res.urls } }))
+      // 영수증 게이트로 0이었던 금액이 복원됐으면 그 사실을 먼저 알린다 (재입력이 필요 없음을 보인다)
+      if (res.restoredAmount) {
+        setReceiptNotice((p) => ({ ...p, [id]: { kind: 'ok', text: `영수증 첨부로 ${category} ${res.restoredAmount!.toLocaleString('ko-KR')}원이 다시 계상되었습니다.` } }))
+        return
+      }
       const pdfs = files.filter((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'))
       if (pdfs.length > 0) autoFillFromReceipts(id, pdfs)
       else setReceiptNotice((p) => ({ ...p, [id]: { kind: 'ok', text: `${category} 영수증 ${files.length}장 저장됨.` } }))
@@ -819,6 +851,10 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
         return
       }
       setSavedReceipts((p) => ({ ...p, [id]: { ...(p[id] ?? {}), [subcategory]: res.urls } }))
+      // 마지막 영수증이 떨어져 계상 0이 됐다 — 값이 사라진 게 아니라 보존 중임을 알린다
+      if (res.gatedZero) {
+        setReceiptNotice((p) => ({ ...p, [id]: { kind: 'warn', text: `${category} 영수증이 모두 삭제되어 계상하지 않습니다 — 다시 첨부하면 입력값 그대로 복원됩니다.` } }))
+      }
     })
   }
 
@@ -860,6 +896,10 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
       }
       setItemSaveState((p) => ({ ...p, [key]: 'saved' }))
       setDirty((p) => { const n = new Set(p); n.delete(key); return n })
+      // 영수증이 없어 0원으로 저장된 경우 — 저장 성공처럼만 보이면 계상된 줄 안다
+      if (res.blocked) {
+        setReceiptNotice((p) => ({ ...p, [id]: { kind: 'warn', text: `${res.blocked} 입력값은 저장되어, 영수증을 붙이면 그대로 계상됩니다.` } }))
+      }
     })
   }
 
@@ -1010,12 +1050,12 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
   // 합계도 증빙 게이트를 거친 금액으로 낸다 — 카드 금액과 상단 합계가 어긋나면
   // 어느 쪽이 정산서에 실리는지 알 수 없다 (인원마다 증빙 상태가 다르므로 이름이 필요하다)
   const allEntries = [
-    ...activePersons.map((p) => ({ row: rows[p.key], name: names[p.key] ?? p.name })),
-    ...extraRows.map((e) => ({ row: e as Row, name: e.name })),
+    ...activePersons.map((p) => ({ id: p.key, row: rows[p.key], name: names[p.key] ?? p.name })),
+    ...extraRows.map((e) => ({ id: e.id, row: e as Row, name: e.name })),
   ].filter((e) => !!e.row)
   const allRows = allEntries.map((e) => e.row)
-  const totals = allEntries.reduce((acc, { row: r, name }) => {
-    const d = deriveRow(r, mealDailyLimit, evidenceOf(name))
+  const totals = allEntries.reduce((acc, { id, row: r, name }) => {
+    const d = deriveRow(r, mealDailyLimit, evidenceOf(name), receiptCountsOf(id))
     acc.meal += d.meal
     acc.commute += d.commuteTotal
     acc.lodgingRent += d.lodgingRent
@@ -1111,7 +1151,7 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
   // 렌더마다 타입이 바뀌어 리마운트되고 입력 포커스가 날아간다.
   function renderCard(id: string, r: Row, isExtra: boolean, nameNode: ReactNode) {
     const rowName = isExtra ? (extraRows.find((e) => e.id === id)?.name ?? '') : (names[id] ?? '')
-    const d = deriveRow(r, mealDailyLimit, evidenceOf(rowName))
+    const d = deriveRow(r, mealDailyLimit, evidenceOf(rowName), receiptCountsOf(id))
     const patch = (p: Partial<Row>) => patchRow(id, isExtra, p)
     const commuter = isCommuter(r)
     const residence = commuteModeToResidence(r.commuteMode)
@@ -1208,10 +1248,13 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                 ) : (
                   <>
                     <NumInput
-                      value={isJeonse ? (d.lodgingRent > 0 ? d.lodgingRent.toLocaleString('ko-KR') : '') : r.lodgingRent}
+                      value={isJeonse ? (r.deposit ? convertJeonseToMonthly(parseNum(r.deposit), parseFloat(r.conversionRate) || 0).toLocaleString('ko-KR') : '') : r.lodgingRent}
                       onChange={isJeonse ? undefined : (v) => patch({ lodgingRent: v })}
                       readOnly={isJeonse}
                     />
+                    {/* 영수증이 없으면 입력값이 있어도 계상 0 — 이유를 적어두지 않으면 고장으로 읽힌다.
+                        영수증을 붙이면 입력값 그대로 다시 계상된다 (서버도 같은 규칙) */}
+                    {d.rentBlocked && <p className="text-[11px] font-semibold text-amber-700">⚠ {d.rentBlocked} 입력값은 보존됩니다.</p>}
                     <button type="button" onClick={() => setSheet({ id, isExtra, panel: 'lodging' })}
                       className="mt-auto text-left text-xs font-semibold text-purple-600 hover:underline">
                       🏠 {isJeonse ? '전세 환산 근거' : '계약 형태 (월세/전세)'}
@@ -1230,7 +1273,8 @@ export function StaffCostForm({ siteId, siteName, yearMonth, members, attendance
                 ) : (
                   <>
                     <div className="text-[15px] font-bold text-gray-900">{d.maintApplied > 0 ? `${d.maintApplied.toLocaleString()}원` : '—'}</div>
-                    {d.maintGross > 0 && <p className="text-[11px] text-gray-400">합계 {d.maintGross.toLocaleString()}원에서 부가세 제외</p>}
+                    {d.maintApplied > 0 && d.maintGross > 0 && <p className="text-[11px] text-gray-400">합계 {d.maintGross.toLocaleString()}원에서 부가세 제외</p>}
+                    {d.maintBlocked && <p className="text-[11px] font-semibold text-amber-700">⚠ {d.maintBlocked} 건별 내역은 보존됩니다.</p>}
                     <button type="button" onClick={() => setSheet({ id, isExtra, panel: 'maint' })}
                       className="mt-auto text-left text-xs font-semibold text-orange-600 hover:underline">
                       🧾 내역 {r.maintItems.length > 0 ? `${r.maintItems.length}건 확인` : '입력'}

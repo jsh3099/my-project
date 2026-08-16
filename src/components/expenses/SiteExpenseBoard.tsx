@@ -25,6 +25,7 @@ import {
 } from '@/actions/siteExpenses'
 import { parseExpenseReceipt } from '@/actions/receiptParse'
 import { calcItemized, calcWelfare, remainingLabel } from '@/lib/settlement'
+import { receiptBlockReason } from '@/lib/expenses/evidenceGate'
 import { receiptFileName, receiptHref } from '@/lib/storage/receipts'
 
 // 서버에서 복원하는 draft (월 × 세부항목 1건)
@@ -177,9 +178,9 @@ export function SiteExpenseBoard({
         })
       }
     }
-    // 저장된 인정금액 합 (미리보기 계산과 동일 규칙으로 복원 시점에 계산)
+    // 저장된 인정금액 합 (미리보기 계산과 동일 규칙으로 복원 시점에 계산 — 영수증 게이트 포함)
     for (const card of byKey.values()) {
-      card.savedTotal = computeCardTotal(card)
+      card.savedTotal = cardClaimTotal(card)
       card.items.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'))
     }
     return [...byKey.values()]
@@ -206,6 +207,14 @@ export function SiteExpenseBoard({
       }
     }
     return total
+  }
+
+  // 계상 금액 (영수증 게이트 후) — 필수 증빙 비목은 영수증이 한 장도 없으면 0.
+  // 서버 저장(saveSiteExpenseCard)·첨부 삭제/복원과 동일 규칙이라 화면과 DB가 같은 값을 보인다.
+  function cardClaimTotal(card: Pick<CardState, 'category' | 'subcategory' | 'vatMode' | 'headcount' | 'items' | 'receiptUrls'>): number {
+    const requires = (subDef(card.category, card.subcategory)?.requireDocs.length ?? 0) > 0
+    if (requires && card.receiptUrls.length === 0) return 0
+    return computeCardTotal(card)
   }
 
   // 내역을 연월로 묶는다 — 회차 밖 날짜·미지정은 회차 시작 월로 귀속 (조용히 버리지 않는다)
@@ -331,13 +340,25 @@ export function SiteExpenseBoard({
       setUploading((p) => { const n = new Set(p); n.delete(key); return n })
 
       if ('error' in up) { setNotice((p) => ({ ...p, [key]: { kind: 'warn', text: up.error } })); return }
-      setCards((p) => p.map((c) => c.key === key ? { ...c, receiptUrls: [...new Set([...c.receiptUrls, ...up.added])] } : c))
+      setCards((p) => p.map((c) => {
+        if (c.key !== key) return c
+        const next = { ...c, receiptUrls: [...new Set([...c.receiptUrls, ...up.added])] }
+        // 영수증 게이트 복원 — 서버가 보존된 내역으로 금액을 되살렸으니 저장값 표시도 맞춘다
+        return up.restored > 0 ? { ...next, savedTotal: cardClaimTotal(next) } : next
+      }))
+      if (up.restored > 0) {
+        setNotice((p) => ({ ...p, [key]: { kind: 'ok', text: `영수증 첨부로 보존된 건별 내역이 다시 계상되었습니다.` } }))
+        return
+      }
 
       if ('error' in parsed) {
         setNotice((p) => ({ ...p, [key]: { kind: 'warn', text: `영수증 ${up.added.length}장 저장됨. ${parsed.error}` } }))
         return
       }
-      const suggestions = parsed.items.filter((i) => i.amountGross > 0)
+      // 같은 영수증을 다시 올린 경우(게이트 복원 등) 이미 있는 내역을 또 제안하지 않는다
+      const suggestions = parsed.items.filter(
+        (i) => i.amountGross > 0 && !card.items.some((it) => it.date === i.date && parseNum(it.amountGross) === i.amountGross),
+      )
       for (const s of suggestions) {
         addItem(key, { date: s.date, vendor: s.vendor, description: s.description, amountGross: fmt(s.amountGross) })
       }
@@ -359,7 +380,13 @@ export function SiteExpenseBoard({
     startTransition(async () => {
       const res = await detachSiteExpenseReceipt(fd)
       if ('error' in res) { setNotice((p) => ({ ...p, [key]: { kind: 'warn', text: res.error } })); return }
-      setCards((p) => p.map((c) => c.key === key ? { ...c, receiptUrls: c.receiptUrls.filter((u) => u !== url) } : c))
+      setCards((p) => p.map((c) => c.key === key
+        ? { ...c, receiptUrls: c.receiptUrls.filter((u) => u !== url), ...(res.gatedZero ? { savedTotal: 0 } : {}) }
+        : c))
+      // 마지막 영수증이 떨어져 계상 0 — 내역이 사라진 게 아니라 보존 중임을 알린다
+      if (res.gatedZero) {
+        setNotice((p) => ({ ...p, [key]: { kind: 'warn', text: '영수증이 모두 삭제되어 계상하지 않습니다 — 다시 첨부하면 건별 내역 그대로 복원됩니다.' } }))
+      }
     })
   }
 
@@ -425,6 +452,10 @@ export function SiteExpenseBoard({
         : c))
       setDirty((p) => { const n = new Set(p); n.delete(key); return n })
       setSaveState((p) => ({ ...p, [key]: 'saved' }))
+      // 영수증이 없어 0원으로 저장된 경우 — 저장 성공처럼만 보이면 계상된 줄 안다
+      if (res.blocked) {
+        setNotice((p) => ({ ...p, [key]: { kind: 'warn', text: `${res.blocked} 건별 내역은 저장되어, 영수증을 붙이면 그대로 계상됩니다.` } }))
+      }
       setOpenCards((p) => { const n = new Set(p); n.delete(key); return n })
       if (revealPicker) setPickerFocus((n) => n + 1)
       router.refresh()
@@ -503,13 +534,13 @@ export function SiteExpenseBoard({
     return b.budget - b.used
   }
 
-  const grandTotal = cards.reduce((s, c) => s + computeCardTotal(c), 0)
+  const grandTotal = cards.reduce((s, c) => s + cardClaimTotal(c), 0)
   const sheetCard = sheetKey ? cards.find((c) => c.key === sheetKey) : undefined
   const sheetDef = sheetCard ? subDef(sheetCard.category, sheetCard.subcategory) : undefined
 
   // 직접경비 총액 초과 미리보기 — 발주청 정산(매 기성·준공)에서 총액 초과분은 청구 불가(미지급)이므로
   // 저장 전에 경고한다. 서버 집계(totalUsed, draft 포함·현장 전체)에 아직 저장 안 된 입력분을 얹는다.
-  const unsavedDelta = cards.reduce((s, c) => s + (computeCardTotal(c) - c.savedTotal), 0)
+  const unsavedDelta = cards.reduce((s, c) => s + (cardClaimTotal(c) - c.savedTotal), 0)
   const projectedTotalRemaining =
     budget && budget.totalBudget > 0 ? budget.totalBudget - budget.totalUsed - unsavedDelta : null
   const overTotalAmount = projectedTotalRemaining !== null && projectedTotalRemaining < 0 ? -projectedTotalRemaining : 0
@@ -523,7 +554,10 @@ export function SiteExpenseBoard({
     const accent = CATEGORY_ACCENT[card.category]
     const status = cardStatus(card)
     const [chipCls, chipLabel] = STATUS_CHIP[status]
-    const total = computeCardTotal(card)
+    const rawTotal = computeCardTotal(card)
+    const total = cardClaimTotal(card)
+    // 영수증이 없어 계상하지 못하는 상태 — 금액만 0이면 고장으로 읽힌다
+    const blocked = rawTotal > 0 && total === 0 ? receiptBlockReason(card.receiptUrls.length) : null
     const remaining = categoryRemaining(card.category)
     const validCount = card.items.filter((it) => parseNum(it.amountGross) > 0).length
     const n = notice[card.key]
@@ -599,6 +633,13 @@ export function SiteExpenseBoard({
               className="rounded p-1 text-gray-300 hover:bg-red-50 hover:text-red-500">✕</button>
           </div>
         </div>
+
+        {/* 영수증 게이트 띠 — 내역은 보존되므로 영수증을 붙이면 그대로 계상된다 */}
+        {blocked && (
+          <div className="border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800">
+            ⚠ {blocked} 건별 내역({fmt(rawTotal)}원)은 보존되어, 영수증을 첨부하면 그대로 계상됩니다.
+          </div>
+        )}
 
         {/* 닫기 확인 띠 — 저장된 값은 지워지지 않는다는 점이 오해 지점이라 문장으로 남긴다 */}
         {closeConfirmKey === card.key && (

@@ -47,3 +47,34 @@ export function evidenceBlockReason(ev: StaffEvidence, subcategory: 'meal' | 'co
   if (missing.length === 0) return null
   return `${missing.join(' · ')} 미첨부 — 증빙이 없어 계상하지 않습니다.`
 }
+
+// ── 2단계: 영수증 기반 비목 · 기술지원 출장비 ──────────────────────
+// 식대·교통비와 같은 원칙을 나머지 비목에도 적용한다.
+//   숙소임대비·관리비·현장경비 → 그 행(카드)에 달린 영수증이 증빙
+//   기술지원 출장비           → 기술지원 출근부가 증빙 (일비·식비도 방문 사실이 근거)
+// 입력값·산출 파라미터(calc_detail, expense_items, trip_visits)는 지우지 않으므로,
+// 증빙을 다시 붙이면 재입력 없이 원래 금액이 복원된다.
+
+/** 영수증 기반 비목(숙소임대비·관리비·현장경비) 인정금액 — 영수증이 한 장도 없으면 0 */
+export function claimableReceiptBased(amount: number, receiptCount: number): number {
+  if (receiptCount <= 0) return 0
+  return Math.max(0, amount)
+}
+
+/** 영수증이 없어 계상하지 않는 이유 — 화면 안내 문구. 계상 가능하면 null */
+export function receiptBlockReason(receiptCount: number): string | null {
+  if (receiptCount > 0) return null
+  return '영수증 미첨부 — 증빙이 없어 계상하지 않습니다.'
+}
+
+/** 기술지원 출장비 인정금액 — 기술지원 출근부가 없으면 0 */
+export function claimableSupportTrip(total: number, hasAttendanceDoc: boolean): number {
+  if (!hasAttendanceDoc) return 0
+  return Math.max(0, total)
+}
+
+/** 기술지원 출근부가 없어 계상하지 않는 이유 — 화면 안내 문구. 계상 가능하면 null */
+export function supportTripBlockReason(hasAttendanceDoc: boolean): string | null {
+  if (hasAttendanceDoc) return null
+  return '출근부 미첨부 — 증빙이 없어 계상하지 않습니다.'
+}

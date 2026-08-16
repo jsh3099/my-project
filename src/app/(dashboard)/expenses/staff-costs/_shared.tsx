@@ -340,6 +340,7 @@ export async function StaffCostsPageContent({
           periodStart={openRound?.period_start}
           periodEnd={openRound?.period_end}
           categoryRemaining={categoryRemaining}
+          hasAttendanceDoc={hasAttendanceDoc}
         />
       ) : (
         <StaffCostForm

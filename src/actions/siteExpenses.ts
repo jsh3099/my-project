@@ -4,10 +4,12 @@
 // 저장 단위는 기존과 동일한 월 × 세부항목 expense 1건 + expense_items[] —
 // 주재비 증분 저장과 같은 reconcile 방식(첨부 보존, 서버 재계산)을 쓴다.
 
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { calcItemized, calcWelfare } from '@/lib/settlement'
 import { EXPENSE_SUBCATEGORIES, type ExpenseCategory } from '@/lib/constants'
+import { claimableReceiptBased, receiptBlockReason } from '@/lib/expenses/evidenceGate'
 import { receiptStoredValue } from '@/lib/storage/receipts'
 
 export interface SiteExpenseItemInput {
@@ -48,7 +50,14 @@ function manualSubcategory(category: ExpenseCategory, subcategory: string) {
   )
 }
 
-type DraftRow = { id: string; year_month: string; receipt_urls: string[] | null; memo: string | null }
+type DraftRow = {
+  id: string
+  year_month: string
+  receipt_urls: string[] | null
+  memo: string | null
+  amount: number
+  vat_mode: 'none' | 'exclude_10'
+}
 
 // 카드의 기존 draft 행 조회 (site × subcategory × 대상자)
 async function fetchCardDrafts(
@@ -59,7 +68,7 @@ async function fetchCardDrafts(
 ): Promise<{ rows: DraftRow[] } | { error: string }> {
   let query = admin
     .from('expenses')
-    .select('id, year_month, receipt_urls, memo')
+    .select('id, year_month, receipt_urls, memo, amount, vat_mode')
     .eq('site_id', siteId)
     .eq('subcategory', subcategory)
     .eq('status', 'draft')
@@ -70,10 +79,93 @@ async function fetchCardDrafts(
   return { rows: (data ?? []) as DraftRow[] }
 }
 
+// ── 영수증 게이트 — 첨부(카드 단위)가 곧 증빙이라, 첨부 유무가 계상 여부를 정한다 ──
+// 필수 증빙이 없는 비목(일비 등 requireDocs가 빈 항목)은 게이트를 걸지 않는다.
+
+function requiresReceipt(category: ExpenseCategory, subcategory: string): boolean {
+  return (manualSubcategory(category, subcategory)?.requireDocs.length ?? 0) > 0
+}
+
+// 카드에 남은 영수증 수 (첨부는 카드의 여러 월 draft 중 한 행에 달린다)
+const cardReceiptCount = (rows: DraftRow[]) => rows.reduce((s, r) => s + (r.receipt_urls ?? []).length, 0)
+
+// 마지막 영수증이 떨어진 카드의 저장 금액을 0으로 — 건별 내역(expense_items)·복리후생
+// 산출(welfare_settlements)은 남겨 재첨부 시 복원한다
+async function gateSiteExpenseAmounts(
+  admin: ReturnType<typeof createAdminClient>,
+  rows: DraftRow[],
+): Promise<{ error: string } | { gated: number }> {
+  let gated = 0
+  for (const row of rows) {
+    if ((row.amount ?? 0) <= 0) continue
+    const { error } = await admin
+      .from('expenses')
+      .update({ amount: 0, amount_gross: null, is_over_limit: false, over_limit_amount: 0 })
+      .eq('id', row.id)
+    if (error) return { error: `계상 갱신 실패: ${error.message}` }
+    gated++
+  }
+  return { gated }
+}
+
+// 첫 영수증이 붙은 카드의 저장 금액을 보존된 건별 내역으로 복원한다 (저장 경로와 동일 재계산)
+async function restoreSiteExpenseAmounts(
+  admin: ReturnType<typeof createAdminClient>,
+  rows: DraftRow[],
+): Promise<{ error: string } | { restored: number }> {
+  let restored = 0
+  for (const row of rows) {
+    if ((row.amount ?? 0) > 0) continue
+    const { data: items } = await admin
+      .from('expense_items')
+      .select('amount_gross')
+      .eq('expense_id', row.id)
+    const grosses = ((items ?? []) as { amount_gross: number }[]).map((i) => i.amount_gross).filter((v) => v > 0)
+    if (grosses.length === 0) continue
+    const { data: welfare } = await admin
+      .from('welfare_settlements')
+      .select('resident_headcount, monthly_limit')
+      .eq('expense_id', row.id)
+      .maybeSingle()
+    const itemized = calcItemized(grosses.map((amountGross) => ({ amountGross })), row.vat_mode, {
+      applyPerItem: !!welfare,
+    })
+    let amount = itemized.appliedTotal
+    let isOverLimit = false
+    let overLimitAmount = 0
+    if (welfare) {
+      const w = calcWelfare({
+        residentHeadcount: welfare.resident_headcount,
+        monthlyLimit: welfare.monthly_limit,
+        evidenceAmount: itemized.appliedTotal,
+      })
+      amount = w.evidenceAmount
+      isOverLimit = w.overLimitAmount > 0
+      overLimitAmount = w.overLimitAmount
+    }
+    if (amount <= 0) continue
+    const { error } = await admin
+      .from('expenses')
+      .update({ amount, amount_gross: itemized.grossTotal, is_over_limit: isOverLimit, over_limit_amount: overLimitAmount })
+      .eq('id', row.id)
+    if (error) return { error: `계상 복원 실패: ${error.message}` }
+    restored++
+  }
+  return { restored }
+}
+
+// 금액이 바뀌는 첨부/삭제 뒤 — 요약·정산 화면이 옛 금액을 계속 보여주지 않게 한다
+function revalidateSiteExpenseViews() {
+  revalidatePath('/expenses')
+  revalidatePath('/expenses/new')
+  revalidatePath('/dashboard')
+  revalidatePath('/settlement')
+}
+
 // 카드 1장 저장 — 월별로 draft를 upsert하고, 내역이 빈 월은 첨부 보존 규칙대로 정리한다
 export async function saveSiteExpenseCard(
   formData: FormData,
-): Promise<{ error: string } | { savedAmounts: Record<string, number> }> {
+): Promise<{ error: string } | { savedAmounts: Record<string, number>; blocked: string | null }> {
   const supabase = await createClient()
   const admin = createAdminClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -90,7 +182,13 @@ export async function saveSiteExpenseCard(
   if ('error' in found) return found
   const existingByMonth = new Map(found.rows.map((r) => [r.year_month, r]))
 
+  // 영수증 게이트 — 필수 증빙 비목은 카드에 영수증이 한 장도 없으면 계상하지 않는다.
+  // 건별 내역·복리후생 산출은 그대로 저장되므로, 영수증을 붙이면 재입력 없이 복원된다.
+  const receiptCount = cardReceiptCount(found.rows)
+  const gateClosed = requiresReceipt(payload.category, payload.subcategory) && receiptCount === 0
+
   const savedAmounts: Record<string, number> = {}
+  let gatedAny = false
 
   for (const ym of payload.months) {
     const items = (payload.itemsByMonth[ym] ?? []).filter((i) => i.amountGross > 0)
@@ -137,15 +235,19 @@ export async function saveSiteExpenseCard(
       overLimitAmount = w.overLimitAmount
     }
 
+    // 게이트로 0이 되어도 건별 내역은 아래에서 그대로 저장한다 — 복원 근거
+    const gated = gateClosed && claimableReceiptBased(amount, receiptCount) < amount
+    if (gated) gatedAny = true
+
     const [yr, mo] = ym.split('-').map(Number)
     const common = {
-      amount,
-      amount_gross: itemized.grossTotal,
+      amount: gated ? 0 : amount,
+      amount_gross: gated ? null : itemized.grossTotal,
       vat_mode: payload.vatMode,
       expense_date: lastDayOfMonth(ym),
       headcount: payload.welfare?.residentHeadcount ?? 1,
-      is_over_limit: isOverLimit,
-      over_limit_amount: overLimitAmount,
+      is_over_limit: gated ? false : isOverLimit,
+      over_limit_amount: gated ? 0 : overLimitAmount,
     }
 
     let expenseId: string
@@ -212,10 +314,11 @@ export async function saveSiteExpenseCard(
       if (welfareError) return { error: `복리후생 정산 저장 실패: ${welfareError.message}` }
     }
 
-    savedAmounts[ym] = amount - overLimitAmount
+    savedAmounts[ym] = gated ? 0 : amount - overLimitAmount
   }
 
-  return { savedAmounts }
+  // 게이트로 0원 저장된 경우 — 저장은 성공했지만 계상되지 않았음을 화면이 알린다
+  return { savedAmounts, blocked: gatedAny ? receiptBlockReason(receiptCount) : null }
 }
 
 export interface SiteExpenseReceiptTarget {
@@ -232,11 +335,11 @@ async function findOrCreateReceiptDraft(
   admin: ReturnType<typeof createAdminClient>,
   userId: string,
   t: SiteExpenseReceiptTarget,
-): Promise<{ id: string; receiptUrls: string[] } | { error: string }> {
+): Promise<{ id: string; receiptUrls: string[]; cardRows: DraftRow[] } | { error: string }> {
   const found = await fetchCardDrafts(admin, t.siteId, t.subcategory, t.targetUserId)
   if ('error' in found) return found
   const anchor = found.rows.find((r) => r.year_month === t.anchorYearMonth) ?? found.rows[0]
-  if (anchor) return { id: anchor.id, receiptUrls: anchor.receipt_urls ?? [] }
+  if (anchor) return { id: anchor.id, receiptUrls: anchor.receipt_urls ?? [], cardRows: found.rows }
 
   const [yr, mo] = t.anchorYearMonth.split('-').map(Number)
   const { data: created, error } = await admin
@@ -262,13 +365,14 @@ async function findOrCreateReceiptDraft(
     .select('id, receipt_urls')
     .single()
   if (error) return { error: `저장 실패: ${error.message}` }
-  return { id: created.id, receiptUrls: created.receipt_urls ?? [] }
+  return { id: created.id, receiptUrls: created.receipt_urls ?? [], cardRows: [] }
 }
 
-// 첨부 즉시 업로드 — 금액은 건드리지 않는다 (주재비 attachStaffCostReceipt와 동일 흐름)
+// 첨부 즉시 업로드 — 입력 금액은 건드리지 않는다 (주재비 attachStaffCostReceipt와 동일 흐름).
+// 단, 영수증 게이트로 0이 되어 있던 카드는 첫 영수증이 붙는 순간 보존된 내역으로 복원된다.
 export async function attachSiteExpenseReceipt(
   formData: FormData,
-): Promise<{ error: string } | { added: string[] }> {
+): Promise<{ error: string } | { added: string[]; restored: number }> {
   const supabase = await createClient()
   const admin = createAdminClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -296,13 +400,22 @@ export async function attachSiteExpenseReceipt(
   const merged = [...new Set([...draft.receiptUrls, ...added])]
   const { error } = await admin.from('expenses').update({ receipt_urls: merged }).eq('id', draft.id)
   if (error) return { error: `저장 실패: ${error.message}` }
-  return { added }
+
+  // 영수증 게이트 복원 — 영수증이 없어 0으로 계상돼 있던 카드를 보존된 건별 내역으로 되살린다
+  let restored = 0
+  if (cardReceiptCount(draft.cardRows) === 0 && requiresReceipt(target.category, target.subcategory)) {
+    const res = await restoreSiteExpenseAmounts(admin, draft.cardRows)
+    if ('error' in res) return res
+    restored = res.restored
+    if (restored > 0) revalidateSiteExpenseViews()
+  }
+  return { added, restored }
 }
 
 // 첨부 개별 삭제 — 카드의 여러 월 draft 중 해당 URL을 가진 행에서 뺀다
 export async function detachSiteExpenseReceipt(
   formData: FormData,
-): Promise<{ error: string } | { success: true }> {
+): Promise<{ error: string } | { success: true; gatedZero: boolean }> {
   const supabase = await createClient()
   const admin = createAdminClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -318,5 +431,14 @@ export async function detachSiteExpenseReceipt(
   const merged = (holder.receipt_urls ?? []).filter((u) => u !== url)
   const { error } = await admin.from('expenses').update({ receipt_urls: merged }).eq('id', holder.id)
   if (error) return { error: `삭제 실패: ${error.message}` }
-  return { success: true }
+
+  // 영수증 게이트 — 카드의 마지막 영수증이 떨어지면 계상 0 (건별 내역은 보존, 재첨부 시 복원)
+  let gatedZero = false
+  if (cardReceiptCount(found.rows) - 1 <= 0 && requiresReceipt(target.category, target.subcategory)) {
+    const res = await gateSiteExpenseAmounts(admin, found.rows)
+    if ('error' in res) return res
+    gatedZero = res.gated > 0
+    if (gatedZero) revalidateSiteExpenseViews()
+  }
+  return { success: true, gatedZero }
 }

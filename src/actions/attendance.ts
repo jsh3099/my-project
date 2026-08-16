@@ -11,6 +11,7 @@ import {
   loadRecalcContext,
   recalcMemberAcrossMonths,
   recalcStaffCostAmounts,
+  recalcSupportTripAmounts,
 } from '@/lib/expenses/recalcStaffCosts'
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -208,6 +209,17 @@ export async function upsertAttendance(formData: FormData) {
         residenceDocByName: ctx.residenceDocByName,
         workDaysByName,
       })
+      if ('error' in res) return { error: res.error }
+    }
+  }
+
+  // 기술지원은 출장비(2-1)로 정산한다 — 출근부 첨부가 필수 증빙이라, 첨부를 지우면 저장된
+  // 출장비를 0으로, 다시 붙이면 보존된 방문일별 산출(trip_visits)로 복원한다 (상주와 같은 원칙)
+  if (staff_type === 'support') {
+    const admin = createAdminClient()
+    for (const ym of months) {
+      const [y, m] = ym.split('-').map(Number)
+      const res = await recalcSupportTripAmounts(admin, site_id, y, m)
       if ('error' in res) return { error: res.error }
     }
   }

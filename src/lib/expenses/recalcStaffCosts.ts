@@ -11,7 +11,13 @@
 
 import type { createAdminClient } from '@/lib/supabase/admin'
 import { calcCommute } from '@/lib/settlement'
-import { claimableCommute, claimableCostPerTrip, claimableMeal, type StaffEvidence } from './evidenceGate'
+import {
+  claimableCommute,
+  claimableCostPerTrip,
+  claimableMeal,
+  claimableSupportTrip,
+  type StaffEvidence,
+} from './evidenceGate'
 
 type Admin = ReturnType<typeof createAdminClient>
 
@@ -177,6 +183,51 @@ export async function loadRecalcContext(
     hasAttendanceDoc: (sheet?.file_urls ?? []).length > 0,
     residenceDocByName,
   }
+}
+
+/**
+ * 저장된 기술지원 출장비(draft) 금액을 출근부 첨부 상태에 맞춰 갱신한다.
+ * 출근부가 없으면 0, 다시 붙으면 보존된 방문일별 산출(trip_visits)의 합으로 복원한다.
+ * 제출·승인된 건과 회차에 편입된 건은 확정분이라 건드리지 않는다 (식대·교통비와 같은 규칙).
+ */
+export async function recalcSupportTripAmounts(
+  admin: Admin,
+  siteId: string,
+  year: number,
+  month: number,
+): Promise<{ updated: number } | { error: string }> {
+  const { data: sheet } = await admin
+    .from('attendance_sheets')
+    .select('file_urls')
+    .eq('site_id', siteId)
+    .eq('year', year)
+    .eq('month', month)
+    .eq('staff_type', 'support')
+    .maybeSingle()
+  const hasDoc = ((sheet?.file_urls ?? []) as string[]).length > 0
+
+  const { data, error } = await admin
+    .from('expenses')
+    .select('id, amount, trip_visits(total)')
+    .eq('site_id', siteId)
+    .eq('year', year)
+    .eq('month', month)
+    .eq('status', 'draft')
+    .eq('subcategory', 'support_trip')
+    .is('settlement_round_id', null)
+    .is('deleted_at', null)
+  if (error) return { error: `출장비 재계산 조회 실패: ${error.message}` }
+
+  let updated = 0
+  for (const row of (data ?? []) as { id: string; amount: number; trip_visits: { total: number }[] | null }[]) {
+    const total = (row.trip_visits ?? []).reduce((s, v) => s + (v.total ?? 0), 0)
+    const amount = claimableSupportTrip(total, hasDoc)
+    if (amount === row.amount) continue
+    const { error: upError } = await admin.from('expenses').update({ amount }).eq('id', row.id)
+    if (upError) return { error: `출장비 재계산 실패: ${upError.message}` }
+    updated++
+  }
+  return { updated }
 }
 
 /**
