@@ -551,10 +551,13 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
                       ? tileChip(pricedBasis[0], pricedBasis[1])
                       : tileChip('bg-gray-100 text-gray-400', '미입력')}
                 </div>
-                <div className="text-[15px] font-bold text-gray-900">{transportTotal > 0 ? `${transportTotal.toLocaleString()}원` : '—'}</div>
+                {/* 게이트로 계상 0인 동안은 취소선 — 배너의 "보존" 설명과 타일 금액이 서로 모순으로 읽혔다 */}
+                <div className={`text-[15px] font-bold ${blocked ? 'text-gray-400 line-through decoration-gray-300' : 'text-gray-900'}`}>
+                  {transportTotal > 0 ? `${transportTotal.toLocaleString()}원` : '—'}
+                </div>
                 {priced.length > 0 && (
                   <p className="text-[11px] text-gray-400">
-                    유류 {fuelSum.toLocaleString()} + 통행료 {tollSum.toLocaleString()} · {priced.length}회
+                    {blocked ? '계상 0원 — 산출 보존 중 · ' : ''}유류 {fuelSum.toLocaleString()} + 통행료 {tollSum.toLocaleString()} · {priced.length}회
                   </p>
                 )}
                 {/* 거리·유가를 한 번에 — 종전엔 인원마다 산출 시트를 열어 [자동]을 두 번 눌러야 했다 */}
@@ -575,16 +578,20 @@ export function SupportTripForm({ siteId, siteName, yearMonth, members, attendan
                   <span className="text-xs font-semibold text-gray-500">일비</span>
                   {dated.length > 0 ? tileChip('bg-blue-50 text-blue-600', '자동') : tileChip('bg-gray-100 text-gray-400', '미입력')}
                 </div>
-                <div className="text-[15px] font-bold text-blue-700">{dated.length > 0 ? `${(dated.length * tripDailyAllowance).toLocaleString()}원` : '—'}</div>
-                <p className="text-[11px] text-gray-400">{dated.length}회 × {tripDailyAllowance.toLocaleString()}원 (출근부 방문일 기준)</p>
+                <div className={`text-[15px] font-bold ${blocked ? 'text-gray-400 line-through decoration-gray-300' : 'text-blue-700'}`}>
+                  {dated.length > 0 ? `${(dated.length * tripDailyAllowance).toLocaleString()}원` : '—'}
+                </div>
+                <p className="text-[11px] text-gray-400">{blocked ? '계상 0원 · ' : ''}{dated.length}회 × {tripDailyAllowance.toLocaleString()}원 (출근부 방문일 기준)</p>
               </div>
               <div className="flex min-h-[92px] flex-col gap-1 bg-white p-3.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold text-gray-500">식비</span>
                   {dated.length > 0 ? tileChip('bg-blue-50 text-blue-600', '자동') : tileChip('bg-gray-100 text-gray-400', '미입력')}
                 </div>
-                <div className="text-[15px] font-bold text-blue-700">{dated.length > 0 ? `${(dated.length * tripMealAllowance).toLocaleString()}원` : '—'}</div>
-                <p className="text-[11px] text-gray-400">{dated.length}회 × {tripMealAllowance.toLocaleString()}원 (출근부 방문일 기준)</p>
+                <div className={`text-[15px] font-bold ${blocked ? 'text-gray-400 line-through decoration-gray-300' : 'text-blue-700'}`}>
+                  {dated.length > 0 ? `${(dated.length * tripMealAllowance).toLocaleString()}원` : '—'}
+                </div>
+                <p className="text-[11px] text-gray-400">{blocked ? '계상 0원 · ' : ''}{dated.length}회 × {tripMealAllowance.toLocaleString()}원 (출근부 방문일 기준)</p>
               </div>
             </div>
 
