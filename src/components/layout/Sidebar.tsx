@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Building2, Users, LayoutDashboard, PlusCircle, ClipboardList, FileText, CalendarCheck, UsersRound, ListOrdered, Settings, CheckSquare, Send } from 'lucide-react'
+import { Building2, Users, LayoutDashboard, PlusCircle, ClipboardList, FileText, CalendarCheck, UsersRound, ListOrdered, Settings, CheckSquare, Send, LogOut } from 'lucide-react'
+import { logout } from '@/actions/auth'
 import type { Role } from '@/lib/constants'
 
 interface SidebarProps {
@@ -88,9 +89,23 @@ export function Sidebar({ role, userName }: SidebarProps) {
         })}
       </nav>
 
-      <div className="border-t border-gray-200 px-4 py-4">
-        <p className="text-xs text-gray-500">로그인 사용자</p>
-        <p className="truncate text-sm font-medium text-gray-800">{userName}</p>
+      {/* 로그아웃 버튼이 어느 화면에도 없어 브라우저 쿠키를 지워야만 계정을 바꿀 수 있었다.
+          현장·본사·관리자 계정을 오가며 확인하는 일이 잦아 사용자 이름 옆에 둔다. */}
+      <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-4 py-4">
+        <div className="min-w-0">
+          <p className="text-xs text-gray-500">로그인 사용자</p>
+          <p className="truncate text-sm font-medium text-gray-800">{userName}</p>
+        </div>
+        <form action={logout}>
+          <button
+            type="submit"
+            title="로그아웃"
+            className="flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
+          >
+            <LogOut className="h-4 w-4" />
+            로그아웃
+          </button>
+        </form>
       </div>
     </aside>
   )
